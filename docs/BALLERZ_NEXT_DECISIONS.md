@@ -1,5 +1,7 @@
 # Ballerz — Decision Log & Next Design Sprint
 
+> **Superseded economic assumptions (20 November 2026):** The founder has since confirmed free-to-play core gameplay, real funded Baller Bucks monetary flows (not simulated budgets or receipts), Solana-native DEX trading against SOL/other available assets, development of the whole club as an economic asset, and hybrid identity naming. See [Economy & Tokenomics v0.2](BALLERZ_ECONOMY_AND_TOKENOMICS_V0.2.md) and [Naming Registry v0.1](BALLERZ_IDENTITY_NAMING_REGISTRY_V0.1.md). Earlier illustrative mechanics and unresolved choices below are historical design exploration, not current decisions.
+
 **20 November 2026.** Draft, not yet approved.
 
 ## Confirmed vocabulary and intent
