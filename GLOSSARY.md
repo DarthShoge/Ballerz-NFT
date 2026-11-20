@@ -66,6 +66,12 @@ A team's place in a league. A team enters the bottom division through automatic 
 **Season**:
 A period of league competition with its own fixtures, standings and champion. Teams, their squads and their history persist across seasons.
 
+**In-game time**:
+The compressed time over which the Ballerz football world advances.
+
+**Wage year**:
+The shared in-game period over which wages accrue. A division can play more than one season within a wage year.
+
 **Competition owner**:
 The holder of a League NFT or Cup NFT, with the right to appoint its admins.
 
@@ -105,6 +111,9 @@ The person responsible for a joint cup's schedule and administration.
 **Fixture**:
 A pairing between two teams for a match.
 
+**Match time**:
+The elapsed time within a simulated match, expressed in football minutes.
+
 **Friendly**:
 A fixture arranged by managers outside official competition.
 
@@ -113,6 +122,9 @@ A scheduled fixture that forms part of a division's season.
 
 **Team sheet**:
 A team's starting eleven, formation and tactic for a fixture.
+
+**Team-sheet deadline**:
+The cutoff for submitting or revising a team sheet for a fixture.
 
 **Emergency loan**:
 Temporary cover for a team that cannot field a legal starting eleven during its season.
@@ -131,6 +143,9 @@ An official fixture outcome when a team fails to fulfil its obligation to play. 
 
 **Double forfeit**:
 A fixture outcome in which both teams forfeit. In a league fixture, each team records a loss and earns zero points, with no score or change to goal difference.
+
+**No contest**:
+A league fixture closed without a competitive result because a verified disruption prevents fair play before year-end.
 
 **Bye**:
 Automatic advancement through a knockout round before the final when the other bracket slot is empty.

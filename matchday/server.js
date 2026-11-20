@@ -2,12 +2,19 @@ import http from 'node:http';
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { extname, join, relative } from 'node:path';
-import { fixtureApi } from './src/fixtures.js';
+import { fixtureApi, playDueFixtures } from './src/fixtures.js';
 import { openStore } from './src/local-store.js';
 
+const configuredEpoch = process.env.WORLD_START_UTC;
+const configuredStart = configuredEpoch === undefined ? null : Date.parse(configuredEpoch);
+if (configuredEpoch !== undefined && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(configuredEpoch) || !Number.isFinite(configuredStart))) {
+  throw new Error('WORLD_START_UTC must be an ISO date and time in UTC, ending in Z.');
+}
 const dataDir = new URL('./data/', import.meta.url);
 mkdirSync(dataDir, {recursive:true});
 const db = openStore(process.env.FIXTURE_DB || fileURLToPath(new URL('fixtures.sqlite', dataDir)));
+const worldStart = db.worldStart(configuredStart);
+const playtest = process.env.BALLERZ_PLAYTEST_CONTROLS === '1';
 const publicDir = new URL('./public/', import.meta.url);
 const types = { '.html':'text/html', '.js':'application/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.woff2':'font/woff2', '.png':'image/png', '.webp':'image/webp' };
 const assets = new Map(readdirSync(publicDir, {recursive:true, withFileTypes:true}).filter(x => x.isFile()).map(entry => {
@@ -29,7 +36,7 @@ const server = http.createServer(async (req, res) => {
         parts.push(part);
       }
       const request = new Request(url, {method:req.method, headers:req.headers, body: parts.length ? Buffer.concat(parts) : undefined});
-      const response = await fixtureApi(request, db);
+      const response = await fixtureApi(request, db, {worldStart, playtest});
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(await response.text());
       return;
@@ -45,4 +52,20 @@ const server = http.createServer(async (req, res) => {
   }
 });
 const port = Number(process.env.PORT || 4173), host = process.env.HOST || '127.0.0.1';
+{
+  let running = false;
+  async function runKickoffs() {
+    if (running) return;
+    running = true;
+    try {
+      await playDueFixtures(db);
+    } catch (error) {
+      console.error('Scheduled kickoff failed:', error.message);
+    } finally {
+      running = false;
+    }
+  }
+  setInterval(runKickoffs, 1000).unref();
+  await runKickoffs();
+}
 server.listen(port, host, () => console.log(`Ballerz Matchday http://${host}:${server.address().port}`));
