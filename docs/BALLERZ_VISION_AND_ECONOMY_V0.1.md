@@ -1,5 +1,7 @@
 # Ballerz: Product Vision, Digital Football Economy & Tokenomics
 
+> **Superseded economic assumptions (20 November 2026):** The founder has since confirmed free-to-play core gameplay, real funded Baller Bucks monetary flows (not simulated budgets or receipts), Solana-native DEX trading against SOL/other available assets, development of the whole club as an economic asset, and hybrid identity naming. See [Economy & Tokenomics v0.2](BALLERZ_ECONOMY_AND_TOKENOMICS_V0.2.md) and [Naming Registry v0.1](BALLERZ_IDENTITY_NAMING_REGISTRY_V0.1.md). Earlier illustrative mechanics and unresolved choices below are historical design exploration, not current decisions.
+
 **Status:** Working design draft v0.1 — 20 November 2026  
 **Purpose:** Preserve founder ideas, distinguish decisions from hypotheses, and give future design, engineering and funding work a common reference. This is a proposal, not a description of a finished or deployed product.
 
