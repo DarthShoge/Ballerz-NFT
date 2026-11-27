@@ -19,15 +19,20 @@ do {
   config.genesis=(local && config.validatorGenesis) || DEVNET_GENESIS;
   const store=openStore(path(config.fixtureDb));
   try {
-    const journals=(config.journals ?? []).map(name=>load(path(name)));
+    const journals=[], errors=[];
+    for (const name of config.journals ?? []) {
+      try { journals.push(load(path(name))); } catch (error) { errors.push(error.message); }
+    }
     if (config.grantLedger) {
-      const grants=new DatabaseSync(path(config.grantLedger),{readOnly:true});
+      let grants;
       try {
+        grants=new DatabaseSync(path(config.grantLedger),{readOnly:true});
         for (const row of grants.prepare('SELECT mint,journal FROM grant_sales ORDER BY rowid').iterate())
           if (Object.hasOwn(config.players,row.mint)) journals.push(JSON.parse(row.journal));
-      } finally { grants.close(); }
+      } catch (error) { errors.push(error.message); } finally { grants?.close(); }
     }
     await indexTransfers(rpc,store.registration,config,journals);
+    if (errors.length) throw new Error(errors.join('\n'));
     if (!mode) console.log(JSON.stringify(store.registration.status(),null,2));
   } catch (error) {
     if (!mode) throw error;

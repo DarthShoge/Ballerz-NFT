@@ -5,7 +5,13 @@ import { clubs } from './football.js';
 import { purchaseListing, verifyTransfer } from './player-transfer.js';
 
 function decodeTerms({listing,buyer}) {
-  const decoded={...listing};
+  const decoded={price:listing.price,wages:listing.wages,blockhash:listing.blockhash,
+    lastValidBlockHeight:listing.lastValidBlockHeight};
+  if (listing.disclosures!==undefined) decoded.disclosures=listing.disclosures;
+  if (listing.grant) {
+    const {revision,claim,relationship,treasury,buyer}=listing.grant;
+    decoded.grant={revision,claim,relationship,treasury,buyer};
+  }
   for (const field of ['playerMint','bbMint','sponsor','seller','version']) decoded[field]=new PublicKey(listing[field]);
   return {listing:decoded,buyer:new PublicKey(buyer)};
 }
@@ -47,7 +53,8 @@ async function reconcile(rpc,register,row,clock) {
   const block=await rpc.getBlockSignatures(proof.slot,'finalized');
   const position=block.signatures.indexOf(row.reference);
   const effectiveAt=(proof.blockTime ?? block.blockTime ?? NaN)*1000;
-  if (position<0 || !Number.isSafeInteger(effectiveAt) || effectiveAt<=0) return;
+  if (position<0 || !Number.isSafeInteger(effectiveAt) || effectiveAt<=0 ||
+      !Number.isFinite(new Date(effectiveAt).getTime())) return;
   register.finalize(row.reference,{slot:proof.slot,position,effectiveAt},clock);
 }
 

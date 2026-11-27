@@ -17,6 +17,7 @@ import { cancelCurrentListing, purchaseListing } from '../src/player-transfer.js
 import { signTrial, setupTransferTrial, settleTrial, submitSigned } from '../scripts/transfer-trial.mjs';
 import { managerListingJourney } from './manager-listing-browser.mjs';
 import { grantSaleJourney } from './grant-sales.mjs';
+import { indexTransfers } from '../src/registration-index.js';
 
 async function playFixture(store, accounts) {
   const now = Date.now();
@@ -207,6 +208,18 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
     await assert.rejects(submitSigned(rpc,cancelled.purchase,cancelled.listing),/simulation failed/i);
     const fresh = await signTrial(rpc,payer,seller,buyer,assets);
     await submitSigned(rpc,fresh.publication,fresh.listing);
+    // Record the old buyer's submitted attempt against the replacement
+    // delegate. A finalized failure must never change the sporting squad.
+    const stale=await rpc.sendRawTransaction(Buffer.from(cancelled.purchase,'base64'),{skipPreflight:true});
+    const staleStatus=await rpc.confirmTransaction({signature:stale,blockhash:cancelled.listing.blockhash,
+      lastValidBlockHeight:cancelled.listing.lastValidBlockHeight},'finalized');
+    assert.ok(staleStatus.value.err);
+    const config={genesis:await rpc.getGenesisHash(),sponsor:payer.publicKey.toBase58(),bbMint:assets.bbMint.toBase58(),
+      players:{[assets.playerMint]:'northbank-7'},wallets:{[seller.publicKey]:'northbank',[buyer.publicKey]:'eastport'}};
+    await indexTransfers(rpc,store.registration,config,[cancelled]);
+    const registration=store.registration.status().find(row=>row.reference===stale);
+    assert.equal(registration.status,'failed');
+    assert.equal(registration.firstFixture,null);
     const rival = purchaseListing(fresh.listing,other.publicKey);
     rival.sign(payer,seller,other);
     const offers = [fresh,{...fresh,buyer:other.publicKey,purchase:rival.serialize().toString('base64')}];
