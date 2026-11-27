@@ -1,11 +1,15 @@
 import { reviewedListing } from './reviewed-listing.js';
+import { getWallets } from '/vendor/wallet-standard.js';
+import { connectInjected, keyOf, standardSolflare } from './listing-wallet.js';
 const el = id => document.getElementById(id);
 const params=new URLSearchParams(location.search);
 const useSolflare=params.get('wallet')==='solflare';
+const registry=useSolflare ? getWallets() : null;
 if (useSolflare) el('connect').textContent='Connect Solflare';
 const suggestedPrice=Number(params.get('price'));
 if (Number.isSafeInteger(suggestedPrice) && suggestedPrice>0) el('price').value=String(suggestedPrice);
 let wallet, seller, state, draft, busy=false, generation=0;
+let unwatch;
 async function api(path='',body) {
   const response=await fetch('/api/listings'+path,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
   const data=await response.json();
@@ -42,17 +46,21 @@ async function run(fn) {
   finally { busy=false; availability(); }
 }
 el('connect').onclick=()=>run(async()=>{
-  const provider=useSolflare ? window.solflare : (window.phantom?.solana || window.solana);
+  const standard=registry?.get().find(w=>w.name==='Solflare');
+  const provider=standard ? standardSolflare(standard) : useSolflare ? window.solflare : (window.phantom?.solana || window.solana);
   if (useSolflare && !provider?.signTransaction) throw Error('Open this page in your Ballerz browser profile with Solflare installed.');
   if (!provider?.signTransaction) throw Error('Open this page in a Solana wallet browser or connect a compatible wallet extension.');
-  const connection=await provider.connect();
-  const publicKey=provider.publicKey ?? connection?.publicKey;
-  if (!publicKey) throw Error('The wallet did not return a public address.');
-  if (wallet!==provider) {
-    const reset=()=>{invalidate();seller=undefined;state=null;el('account').textContent='Wallet changed. Reconnect to review terms.';availability();};
-    provider.on?.('accountChanged',reset); provider.on?.('disconnect',reset);
+  unwatch?.();invalidate();wallet=undefined;seller=undefined;state=null;availability();
+  el('message').textContent='Waiting for wallet connection approval…';
+  const reset=()=>{invalidate();wallet=undefined;seller=undefined;state=null;el('account').textContent='Wallet changed. Reconnect to review terms.';availability();};
+  const publicKey=standard ? await provider.connect() : await connectInjected(provider);
+  if (standard) unwatch=provider.watch(reset);
+  else {
+    provider.on?.('accountChanged',reset);provider.on?.('disconnect',reset);
+    unwatch=()=>{const off=provider.off ?? provider.removeListener;off?.call(provider,'accountChanged',reset);off?.call(provider,'disconnect',reset);};
   }
-  wallet=provider; seller=publicKey.toBase58(); invalidate(); await refresh();
+  wallet={get publicKey(){return keyOf(provider.publicKey) ?? publicKey;},signTransaction:tx=>provider.signTransaction(tx)};
+  seller=publicKey.toBase58();el('message').textContent='';await refresh();
 });
 el('price').oninput=invalidate;
 function review(action) {

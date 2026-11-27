@@ -13,9 +13,10 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
   const genesis=await rpc.getGenesisHash();
   const open=()=>openListingDesk(rpc,sponsor,join(world,'manager.sqlite'),genesis);
   let desk=await open();
-  const files=new Map(['listings.html','listings.js','reviewed-listing.js','listings.css','matchday.css'].map(name=>[
+  const files=new Map(['listings.html','listings.js','listing-wallet.js','reviewed-listing.js','listings.css','matchday.css'].map(name=>[
     '/'+name,readFileSync(new URL('../public/'+name,import.meta.url))]));
   files.set('/vendor/solana.js',readFileSync(join(dirname(createRequire(import.meta.url).resolve('@solana/web3.js')),'index.iife.min.js')));
+  files.set('/vendor/wallet-standard.js',readFileSync(new URL('wallets.js',import.meta.resolve('@wallet-standard/app'))));
   const server=http.createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,'http://localhost');
@@ -69,10 +70,22 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
     assert.equal((await request('/approve',{...packet,quote:{...packet.quote,price:1},signed})).status,400);
     await page.goto(origin+'/listings.html?wallet=solflare&price=100000');
     const button=name=>page.getByRole('button',{name,exact:true});
-    await page.evaluate(()=>{window.savedSolflare=window.solflare;delete window.solflare;});
+    await page.evaluate(()=>{delete window.solflare;});
     await button('Connect Solflare').click();
     await page.getByText(/with Solflare installed/).waitFor();
-    await page.evaluate(()=>{window.solflare=window.savedSolflare;});
+    await page.evaluate(address=>{
+      const account={address,chains:['solana:devnet']};
+      const standard={name:'Solflare',accounts:[account],features:{
+        'standard:connect':{connect:async()=>({accounts:[account]})},
+        'standard:events':{on:()=>()=>{}},
+        'solana:signTransaction':{signTransaction:async input=>{
+          if(input.account!==account || input.chain!=='solana:devnet') throw Error('Wrong wallet or chain');
+          const wire=await window.testSign(btoa(String.fromCharCode(...input.transaction)));
+          return [{signedTransaction:Uint8Array.from(atob(wire),c=>c.charCodeAt(0))}];
+        }}
+      }};
+      window.dispatchEvent(new CustomEvent('wallet-standard:register-wallet',{detail:api=>api.register(standard)}));
+    },address);
     await button('Connect Solflare').click();
     await button('Review listing').click();
     await page.locator('#terms').getByText('130,000 test BB',{exact:true}).waitFor();

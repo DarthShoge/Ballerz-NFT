@@ -40,6 +40,7 @@ const assets = new Map(readdirSync(publicDir, {recursive:true, withFileTypes:tru
 }));
 
 const web3 = createRequire(import.meta.url).resolve('@solana/web3.js');
+assets.set('/vendor/wallet-standard.js',{data:readFileSync(new URL('wallets.js',import.meta.resolve('@wallet-standard/app'))),type:'application/javascript'});
 assets.set('/vendor/solana.js',{data:readFileSync(join(web3,'..','index.iife.min.js')),type:'application/javascript'});
 
 const server = http.createServer(async (req, res) => {
