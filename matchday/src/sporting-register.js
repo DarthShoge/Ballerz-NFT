@@ -1,5 +1,6 @@
 import { fixtureClubs, validatePlan } from './football.js';
 import { computerPlan } from './computer-manager.js';
+import { clubWallets } from './club-wallets.js';
 
 // Only the local settlement worker writes this register. Matchday managers
 // read public references and choose their XI through the existing fixture API.
@@ -19,9 +20,7 @@ export function sportingRegister(db) {
     if (db.prepare('SELECT 1 FROM sporting_players WHERE genesis<>? OR bb<>? OR sponsor<>? LIMIT 1').get(genesis,bb,sponsor))
       throw new Error('Fixture database belongs to a different registration network, currency or sponsor.');
   }
-  const conflictingWallet=db.prepare(`SELECT 1 FROM sporting_sales
-    WHERE (json_extract(terms,'$.listing.seller')=? AND seller<>?)
-       OR (json_extract(terms,'$.buyer')=? AND buyer<>?) LIMIT 1`);
+  const wallets=clubWallets(db);
   function project(state) {
     if (!state.schedule) return false;
     const rows=db.prepare(`SELECT player,buyer,reference FROM (
@@ -46,8 +45,7 @@ export function sportingRegister(db) {
       return atomic(()=>{
         checkPilot(genesis,bb,sponsor);
         for (const [wallet,club] of [[terms.listing?.seller,seller],[terms.buyer,buyer]]) {
-          if (wallet && conflictingWallet.get(String(wallet),club,String(wallet),club))
-            throw new Error('An existing wallet cannot change its club mapping.');
+          if (wallet) wallets.bind(String(wallet),club);
         }
         db.prepare('INSERT OR IGNORE INTO sporting_players VALUES(?,?,?,?,?)').run(player,mint,genesis,bb,sponsor);
         if (!db.prepare('SELECT 1 FROM sporting_players WHERE player=? AND mint=? AND genesis=? AND bb=? AND sponsor=?')

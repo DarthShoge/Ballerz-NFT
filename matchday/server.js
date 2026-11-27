@@ -7,6 +7,7 @@ import { openStore } from './src/local-store.js';
 import { createRequire } from 'node:module';
 import { Connection, Keypair } from '@solana/web3.js';
 import { listingApi, openListingDesk } from './src/manager-listings.js';
+import { loanApi, openLoanDesk } from './src/loan-desk.js';
 
 const configuredEpoch = process.env.WORLD_START_UTC;
 const configuredStart = configuredEpoch === undefined ? null : Date.parse(configuredEpoch);
@@ -15,7 +16,9 @@ if (configuredEpoch !== undefined && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\
 }
 const dataDir = new URL('./data/', import.meta.url);
 mkdirSync(dataDir, {recursive:true});
-const db = openStore(process.env.FIXTURE_DB || fileURLToPath(new URL('fixtures.sqlite', dataDir)));
+const fixtureFile = process.env.FIXTURE_DB || fileURLToPath(new URL('fixtures.sqlite', dataDir));
+const db = openStore(fixtureFile);
+const loanDesk = process.env.BALLERZ_LOAN_OPERATOR ? openLoanDesk(process.env.BALLERZ_LOAN_OPERATOR,fixtureFile) : null;
 const sponsorFile = process.env.BALLERZ_LISTING_SPONSOR;
 let listingDesk;
 function getListingDesk() {
@@ -56,7 +59,9 @@ const server = http.createServer(async (req, res) => {
       }
       const request = new Request(url, {method:req.method, headers:req.headers, body: parts.length ? Buffer.concat(parts) : undefined});
       const response = url.pathname.startsWith('/api/listings')
-        ? await listingApi(request,await getListingDesk()) : await fixtureApi(request, db, {worldStart, playtest});
+        ? await listingApi(request,await getListingDesk())
+        : url.pathname.startsWith('/api/loans/') ? await loanApi(request,loanDesk)
+        : await fixtureApi(request, db, {worldStart, playtest});
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(await response.text());
       return;
