@@ -97,6 +97,8 @@ node --test
 node scripts/benchmark.mjs 120 20261201
 ```
 
+To run the payout integration suite on x86-64 Linux or WSL, install the locked Node dependencies and run `bash scripts/test-payouts.sh` from this directory. It provisions an isolated validator, checksum-verifies the Solana programs, plays fixtures and starts separate settlement processes. Each run uses temporary keys, ledger and SQLite files. Set `SOLANA_TEST_VALIDATOR` to reuse an installed Agave 4.4.1 validator. GitHub requires both **Matchday regression tests** and **Solana payout integration** on pull requests to `main`.
+
 The server validates club membership, formation and eleven unique selections. Unsubmitted tactics stay in the manager's browser. In friendlies, each team sheet locks on submission and the match starts when both managers are ready. Locked team sheets stay hidden from the opponent until full time. A version check protects simultaneous submissions, so both managers see the same result.
 
 Both modes use two fixed squads. Scheduled playtest fixtures support optional operator-approved Devnet appearance payments. League standings, outage rescheduling, transfers and Solana club ownership belong to later development.

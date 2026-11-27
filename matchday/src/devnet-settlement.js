@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction
 } from '@solana/web3.js';
@@ -121,8 +122,14 @@ export async function settleAppearance(connection, payer, accounts, id, state) {
   if (!await connection.getAccountInfo(batch.marker, finality)) {
     try { signature = await sendAndConfirmTransaction(connection, batch.transaction, [payer], options); }
     catch (error) {
-      // A concurrent/retried call may already have finalized the very same batch.
-      if (!await connection.getAccountInfo(batch.marker, finality)) throw error;
+      // Preflight can see a competing payment before the winner has finalized.
+      // Only the finalized marker and verified creation transaction prove payment.
+      if (!await connection.getAccountInfo(batch.marker, 'processed')) throw error;
+      const deadline = Date.now() + 60_000;
+      while (!await connection.getAccountInfo(batch.marker, finality)) {
+        if (Date.now() >= deadline) throw error;
+        await delay(400);
+      }
     }
   }
   if (!signature) {

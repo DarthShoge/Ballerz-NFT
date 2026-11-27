@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Connection, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { createTransferCheckedInstruction } from '@solana/spl-token';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, createTransferCheckedInstruction, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { appearanceBatch, treasuryAddresses, fundTreasury } from '../src/devnet-settlement.js';
 import { approveFixture } from '../src/fixture-appearance.js';
 import { fixtureApi } from '../src/fixtures.js';
@@ -47,10 +47,14 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   const port = randomInt(18000,28000);
   const rpc = new Connection('http://127.0.0.1:' + port, 'finalized');
   const log = openSync(join(world,'validator.out'),'w');
+  const programs = process.env.SOLANA_TEST_PROGRAM_DIR;
   const validator = spawn(process.env.SOLANA_TEST_VALIDATOR || 'solana-test-validator', [
     '--ledger',join(world,'ledger'),'--bind-address','127.0.0.1','--rpc-port',String(port),
     '--faucet-port',String(port+2),'--gossip-port',String(port+3),
-    '--dynamic-port-range',(port+4)+'-'+(port+40),'--mint',payer.publicKey.toBase58(),'--quiet'
+    '--dynamic-port-range',(port+4)+'-'+(port+40),'--mint',payer.publicKey.toBase58(),'--quiet',
+    '--bpf-program',TOKEN_PROGRAM_ID.toBase58(),join(programs,'spl_token.so'),
+    '--bpf-program',ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),join(programs,'spl_associated_token_account.so'),
+    '--bpf-program','MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',join(programs,'spl_memo.so')
   ], {stdio:['ignore',log,log]});
   closeSync(log);
   const stopped = once(validator,'close');
@@ -68,8 +72,13 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
     if (validator.exitCode !== null || validator.signalCode || !validator.pid || attempt >= 120) {
       throw new Error('Local validator failed to start: ' + readFileSync(join(world,'validator.out'),'utf8').slice(-1500));
     }
-    try { if (await rpc.getBalance(payer.publicKey,'confirmed') > 1_000_000_000) break; } catch {}
+    try {
+      if (await rpc.getSlot('finalized') >= 2 && await rpc.getBalance(payer.publicKey,'finalized') > 1_000_000_000) break;
+    } catch {}
     await delay(500);
+  }
+  for (const key of [TOKEN_PROGRAM_ID,ASSOCIATED_TOKEN_PROGRAM_ID]) {
+    assert.ok((await rpc.getAccountInfo(key,'finalized'))?.executable, 'Missing executable program ' + key.toBase58());
   }
   await fundTreasury(rpc,payer,accounts);
   async function balances() {
@@ -128,7 +137,6 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
     const id = await playFixture(store,accounts);
     const {transaction,marker} = await markerFor(id);
     // Park BB in a separate token account so neither club receives a setup transfer.
-    const {getOrCreateAssociatedTokenAccount} = await import('@solana/spl-token');
     const reserveKey = Keypair.generate();
     const reserve = await getOrCreateAssociatedTokenAccount(rpc,payer,accounts.mint,reserveKey.publicKey);
     async function move(source,destination,authority,amount) {
