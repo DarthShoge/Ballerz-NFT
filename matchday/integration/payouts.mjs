@@ -185,8 +185,13 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   const [seller,buyer] = clubKeys;
   const other = Keypair.generate();
   const provision = () => setupTransferTrial(rpc,payer,seller.publicKey,[buyer.publicKey,other.publicKey]);
-  const [assets,concurrentSetup] = await Promise.all([provision(),provision()]);
-  assert.deepEqual(concurrentSetup,assets);
+  // Keep the validator alive until both callers have finished confirmation.
+  // A fast rejection must not tear down the RPC under the outstanding caller.
+  const results = await Promise.allSettled([provision(),provision()]);
+  const failed = results.filter(result=>result.status==='rejected');
+  assert.equal(failed.length,0,failed.map(result=>result.reason?.stack ?? result.reason).join('\n'));
+  const assets=results[0].value;
+  assert.deepEqual(results[1].value,assets);
   await t.test('a manager reviews, signs, recovers and cancels the listing in their browser', async () => {
     await managerListingJourney(rpc,payer,seller,buyer,world);
   });
