@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { join } from 'node:path';
+import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
+import {
+  AccountLayout, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE, TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction, createInitializeMint2Instruction,
+  createMintToInstruction
+} from '@solana/spl-token';
+import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
+import { appearanceBatch, treasuryAddresses } from '../src/devnet-settlement.js';
+
+test('signed payout instructions roll back together and a new blockhash cannot pay a fixture twice', async () => {
+  const svm = new LiteSVM().withSigverify(true);
+  const programs = process.env.SOLANA_TEST_PROGRAM_DIR;
+  for (const [key, name] of [[TOKEN_PROGRAM_ID,'spl_token'],[ASSOCIATED_TOKEN_PROGRAM_ID,'spl_associated_token_account'],
+    [new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),'spl_memo']]) {
+    svm.addProgramFromFile(key,join(programs,name+'.so'));
+  }
+  const payer = Keypair.generate();
+  const owners = [Keypair.generate().publicKey,Keypair.generate().publicKey];
+  const accounts = await treasuryAddresses(payer.publicKey,owners);
+  svm.airdrop(payer.publicKey,2_000_000_000n);
+  function send(tx) {
+    svm.expireBlockhash();
+    tx.recentBlockhash = svm.latestBlockhash();
+    tx.feePayer = payer.publicKey;
+    tx.sign(payer);
+    return svm.sendTransaction(tx);
+  }
+  function succeed(tx) {
+    const result = send(tx);
+    assert.ok(!(result instanceof FailedTransactionMetadata), result.toString());
+  }
+  function balances() {
+    return [accounts.vault,...accounts.clubs].map(key => AccountLayout.decode(svm.getAccount(key).data).amount);
+  }
+  const setup = new Transaction().add(SystemProgram.createAccountWithSeed({
+    fromPubkey:payer.publicKey, basePubkey:payer.publicKey, seed:'ballerz-test-bb-v1',
+    newAccountPubkey:accounts.mint, programId:TOKEN_PROGRAM_ID, space:MINT_SIZE,
+    lamports:Number(svm.minimumBalanceForRentExemption(BigInt(MINT_SIZE)))
+  }),createInitializeMint2Instruction(accounts.mint,0,payer.publicKey,null));
+  for (const [i,owner] of [payer.publicKey,...owners].entries()) {
+    setup.add(createAssociatedTokenAccountIdempotentInstruction(payer.publicKey,[accounts.vault,...accounts.clubs][i],owner,accounts.mint));
+  }
+  const topUp = () => createMintToInstruction(accounts.mint,accounts.vault,payer.publicKey,8000n);
+  succeed(setup.add(topUp()));
+  const state = {schedule:{deadlineAt:100},plans:[{},{}],receivedAt:[99,99],result:{engineVersion:13,score:[1,0]},
+    appearanceApproval:{mint:accounts.mint.toBase58(),owners:owners.map(key => key.toBase58())}};
+  const {transaction,marker} = await appearanceBatch('runtime-fixture',state,payer.publicKey,accounts,
+    Number(svm.minimumBalanceForRentExemption(0n)));
+  const underfunded = send(transaction);
+  assert.ok(underfunded instanceof FailedTransactionMetadata);
+  assert.match(underfunded.meta().logs().join('\n'),/insufficient funds/i);
+  assert.equal(svm.getAccount(marker),null);
+  assert.deepEqual(balances(),[8000n,0n,0n]);
+  succeed(new Transaction().add(topUp()));
+  succeed(transaction);
+  const duplicate = send(transaction);
+  assert.ok(duplicate instanceof FailedTransactionMetadata);
+  assert.match(duplicate.meta().logs().join('\n'),/already in use/i);
+  assert.deepEqual(balances(),[0n,8000n,8000n]);
+});

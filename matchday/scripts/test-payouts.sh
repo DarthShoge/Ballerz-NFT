@@ -25,4 +25,4 @@ fetch_program token program@v3.5.0 spl_token.so 18264f491c7e0ad056dd36f42f8de6d1
 fetch_program associated-token-account program@v1.1.2 spl_associated_token_account.so 9ba8d4dfec9ca6ba8480f7f4edcc1a90184271db44e238ea0f09bba47ad2d8a9
 fetch_program memo program@v3.0.0 spl_memo.so f520eaf096361abbb9639ea4dc3e5388a87b9330e121f476607b87c46ef67954
 export SOLANA_TEST_PROGRAM_DIR="$assets"
-node --test integration/payouts.mjs
+node --test integration/payout-runtime.mjs integration/payouts.mjs

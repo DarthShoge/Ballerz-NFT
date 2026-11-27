@@ -35,7 +35,7 @@ async function playFixture(store, accounts) {
   let view = await call(path + '/kickoff-now','POST',key);
   for (let i=0; i<24 && !view.result; i++) view = await call(path + '/fast-forward','POST',key);
   assert.ok(view.result?.engineVersion);
-  return id;
+  return {id, homeKey:key};
 }
 
 test('matchday payouts against a fresh Solana validator', {timeout:540_000}, async t => {
@@ -99,7 +99,7 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   }
 
   await t.test('recover the original payment after a process dies before the SQLite write', async () => {
-    const id = await playFixture(store,accounts);
+    const {id,homeKey} = await playFixture(store,accounts);
     assert.deepEqual(await balances(),[160000n,0n,0n]);
     assert.equal((await worker(id,'crash').done).code,86);
     assert.equal(JSON.parse(store.read(id).state).appearanceReceipt,undefined);
@@ -111,16 +111,26 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
     assert.equal(recovered.result.status,'already paid');
     assert.equal(recovered.result.signature,history[0].signature);
     assert.equal(JSON.parse(store.read(id).state).appearanceReceipt.signature,history[0].signature);
+    const report = await fixtureApi(new Request('http://local/api/fixtures/' + id,{
+      headers:{Authorization:'Bearer ' + homeKey}
+    }),store,{worldStart:store.worldStart()});
+    assert.equal(report.status,200);
+    assert.equal((await report.json()).appearanceReceipt.signature,history[0].signature);
     assert.deepEqual(await balances(),[144000n,8000n,8000n]);
   });
 
   await t.test('two workers with different blockhashes race for the next fixture', async () => {
-    const id = await playFixture(store,accounts);
+    const {id} = await playFixture(store,accounts);
+    function signed(worker) {
+      return Promise.race([once(worker.child,'message'),worker.done.then(({code}) => {
+        throw new Error('Worker exited before the submission barrier with code ' + code);
+      })]);
+    }
     const first = worker(id,'race');
-    const [a] = await once(first.child,'message');
+    const [a] = await signed(first);
     while ((await rpc.getLatestBlockhash('finalized')).blockhash === a.ready) await delay(150);
     const second = worker(id,'race');
-    const [b] = await once(second.child,'message');
+    const [b] = await signed(second);
     assert.ok(a.ready && b.ready && a.ready !== b.ready);
     first.child.send('submit');
     second.child.send('submit');
@@ -134,7 +144,7 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   });
 
   await t.test('a failed second transfer rolls back the entire batch and a funded retry pays once', async () => {
-    const id = await playFixture(store,accounts);
+    const {id} = await playFixture(store,accounts);
     const {transaction,marker} = await markerFor(id);
     // Park BB in a separate token account so neither club receives a setup transfer.
     const reserveKey = Keypair.generate();
