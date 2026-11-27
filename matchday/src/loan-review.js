@@ -31,7 +31,7 @@ export function loanTerms(parent, {borrower, startAt, endAt, borrowerWageBps = 1
 }
 
 // A review describes proposed terms. Activation requires a separate agreement.
-export async function reviewLoan(db, rpc, config, request, clock = Date.now) {
+export async function reviewLoan(db, rpc, config, request, clock = Date.now, minimumSlot = 0) {
   const latest = db.prepare(`SELECT p.genesis,p.bb,p.sponsor,p.mint,s.slot,s.reference,s.buyer AS parent,
       json_extract(s.terms,'$.buyer') AS wallet
     FROM sporting_sales s JOIN sporting_players p USING(player)
@@ -43,12 +43,13 @@ export async function reviewLoan(db, rpc, config, request, clock = Date.now) {
   const mintAddress = new PublicKey(row.mint);
   const owner = new PublicKey(row.wallet);
   const tokenAddress = getAssociatedTokenAddressSync(mintAddress, owner);
+  const minContextSlot = Math.max(row.slot,minimumSlot);
   const snapshot = await rpc.getMultipleAccountsInfoAndContext([mintAddress, tokenAddress], {
-    commitment: 'finalized', minContextSlot: row.slot
+    commitment: 'finalized', minContextSlot
   });
   const mint = unpackMint(mintAddress, snapshot.value[0]);
   const title = unpackAccount(tokenAddress, snapshot.value[1]);
-  if (!Number.isSafeInteger(snapshot.context.slot) || snapshot.context.slot < row.slot ||
+  if (!Number.isSafeInteger(snapshot.context.slot) || snapshot.context.slot < minContextSlot ||
       !mint.isInitialized || mint.decimals || mint.supply !== 1n ||
       mint.mintAuthority || mint.freezeAuthority || !title.isInitialized || title.isFrozen ||
       !title.owner.equals(owner) || !title.mint.equals(mintAddress) || title.amount !== 1n)

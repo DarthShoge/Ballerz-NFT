@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { GAME_WEEK_MS } from '../src/world-clock.js';
+import { managerLoanJourney } from './manager-loan-browser.mjs';
 
-export async function registrationJourney(rpc,world,trial,journal,settle) {
+export async function registrationJourney(rpc,world,trial,journal,settle,managers) {
   const fixtureDb=join(world,'sporting.sqlite'), configFile=join(world,'sporting.json');
   const config={fixtureDb,validatorGenesis:await rpc.getGenesisHash(),sponsor:trial.listing.sponsor,
     bbMint:trial.listing.bbMint,players:{[trial.listing.playerMint]:'northbank-7'},
@@ -16,7 +17,7 @@ export async function registrationJourney(rpc,world,trial,journal,settle) {
   const write=()=>writeFileSync(configFile,JSON.stringify(config));
   write();
   const env={...process.env,BALLERZ_DEVNET_RPC:rpc.rpcEndpoint,FIXTURE_DB:fixtureDb,
-    PORT:'0',HOST:'127.0.0.1',WORLD_START_UTC:new Date(Date.now()-86400000).toISOString()};
+    BALLERZ_LOAN_OPERATOR:configFile,PORT:'0',HOST:'127.0.0.1',WORLD_START_UTC:new Date(Date.now()-86400000).toISOString()};
   const index=async()=>JSON.parse((await promisify(execFile)(process.execPath,
     [fileURLToPath(new URL('../scripts/register-transfers.mjs',import.meta.url)),configFile],{env})).stdout);
   const server=spawn(process.execPath,[fileURLToPath(new URL('../server.js',import.meta.url))],{env,stdio:['ignore','pipe','pipe']});
@@ -79,6 +80,18 @@ export async function registrationJourney(rpc,world,trial,journal,settle) {
     assert.equal(proposal.ownershipReference,receipt.signature);
     assert.equal(proposal.borrowerWageBps,10000);
     assert.deepEqual((await api('/'+id,away.key)).plans,sheet.plans);
+    config.loanManagers={eastport:String(managers.parent.publicKey),northbank:String(managers.borrower.publicKey)};
+    config.wallets=Object.fromEntries(Object.entries(config.loanManagers).map(([club,wallet])=>[wallet,club]));
+    write();
+    const issue=()=>promisify(execFile)(process.execPath,
+      [fileURLToPath(new URL('../scripts/propose-loan.mjs',import.meta.url)),configFile,proposalFile],{env});
+    const agreement=JSON.parse((await issue()).stdout);
+    assert.equal(JSON.parse((await issue()).stdout).terms.id,agreement.terms.id);
+    await managerLoanJourney(browser,origin,agreement,managers);
+    const recovered=JSON.parse((await issue()).stdout);
+    assert.equal(recovered.terms.id,agreement.terms.id);
+    assert.equal(recovered.status,'scheduled');
+    assert.ok(recovered.parentApproved && recovered.borrowerApproved && recovered.confirmedAt);
     return receipt;
   } finally {
     try { await browser?.close(); } finally { server.kill(); await closed; }

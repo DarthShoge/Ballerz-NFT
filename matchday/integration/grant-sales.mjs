@@ -87,7 +87,7 @@ export async function grantSaleJourney(rpc,payer,world) {
     const signedFile=join(world,'approved-grant-sale.json');
     writeFileSync(signedFile,JSON.stringify(independent),{mode:0o600});
     const loss=await registrationJourney(rpc,world,independent,signedFile,async()=>
-      JSON.parse((await command('settle',signedFile)).stdout));
+      JSON.parse((await command('settle',signedFile)).stdout),{parent:away,borrower:home});
     assert.deepEqual([loss.grant.recovered,loss.grant.writtenOff,loss.grant.carried],[150000,50000,0]);
     assert.equal(ledger.quote({...independent.listing,seller:away.publicKey},home.publicKey).grant.claim,0);
     assert.equal((await rpc.getTokenAccountBalance(getAssociatedTokenAddressSync(bbMint,treasury.publicKey),'finalized')).value.amount,'350000');
