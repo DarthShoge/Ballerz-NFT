@@ -39,8 +39,10 @@ test('underfunded wages roll back the fee and title; an expired signed purchase 
     return mint;
   }
   const bbMint=mint(buyer,100000n,30000n), playerMint=mint(seller,1n,0n);
+  const treasury=Keypair.generate().publicKey;
   const listing={sponsor,seller,playerMint,bbMint,version:version.publicKey,blockhash:svm.latestBlockhash(),
-    lastValidBlockHeight:150,price:100000,wages:30000};
+    lastValidBlockHeight:150,price:100000,wages:30000,
+    grant:{claim:70000,relationship:'independent',buyer:buyer.toBase58(),treasury:treasury.toBase58(),revision:0}};
   send(publishListing(listing,rent(MULTISIG_SIZE)),home,version);
   const replacement = Keypair.generate();
   const revised = {...listing,version:replacement.publicKey,price:100001};
@@ -66,6 +68,7 @@ test('underfunded wages roll back the fee and title; an expired signed purchase 
   assert.match(failure.meta().logs().join('\n'),/insufficient funds/i);
   assert.equal(amount(bbMint,buyer),100000n);
   assert.equal(amount(bbMint,seller),0n);
+  assert.equal(amount(bbMint,treasury),0n);
   assert.equal(amount(playerMint,seller),1n);
   send(new Transaction().add(createTransferCheckedInstruction(ata(bbMint,sponsor),bbMint,ata(bbMint,buyer),sponsor,30000n,0)));
   svm.expireBlockhash();
@@ -74,4 +77,17 @@ test('underfunded wages roll back the fee and title; an expired signed purchase 
   assert.match(expired.toString(),/blockhash/i);
   assert.equal(amount(bbMint,buyer),130000n);
   assert.equal(amount(playerMint,buyer),0n);
+  const next=Keypair.generate();
+  listing.version=next.publicKey;
+  listing.blockhash=svm.latestBlockhash();
+  send(publishListing(listing,rent(MULTISIG_SIZE)),home,next);
+  const sale=purchaseListing(listing,buyer);
+  send(sale,home,away);
+  assert.equal(amount(bbMint,treasury),70000n);
+  assert.equal(amount(bbMint,seller),30000n);
+  assert.equal(amount(bbMint,sponsor),30000n);
+  assert.equal(amount(bbMint,buyer),0n);
+  assert.equal(amount(playerMint,buyer),1n);
+  assert.ok(svm.sendTransaction(sale) instanceof FailedTransactionMetadata);
+  assert.equal(amount(bbMint,treasury),70000n);
 });

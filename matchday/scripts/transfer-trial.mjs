@@ -1,15 +1,16 @@
 // Fixture data and transaction submission for the closed, zero-commission trial.
 import bs58 from 'bs58';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { Keypair, PublicKey, SystemInstruction, SystemProgram, Transaction } from '@solana/web3.js';
 import {
   AuthorityType, MINT_SIZE, MULTISIG_SIZE, TOKEN_PROGRAM_ID, createInitializeMint2Instruction,
   createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction, createSetAuthorityInstruction,
-  getAssociatedTokenAddressSync, getMint
+  getAssociatedTokenAddressSync, getAccount, getMint
 } from '@solana/spl-token';
 import { publishListing, purchaseListing, verifyTransfer } from '../src/player-transfer.js';
 
-async function fixedMint(rpc,sponsor,seed,initialHoldings) {
+export async function fixedMint(rpc,sponsor,seed,initialHoldings) {
   const owner = sponsor.publicKey;
   const mint = await PublicKey.createWithSeed(owner,seed,TOKEN_PROGRAM_ID);
   if (!await rpc.getAccountInfo(mint,'finalized')) {
@@ -53,18 +54,38 @@ export async function setupTransferTrial(rpc,sponsor,seller,buyers) {
   return {bbMint,playerMint};
 }
 
-export async function signTrial(rpc, sponsor, seller, buyer, assets) {
+async function requireLegacyAssets({sponsor,bbMint,playerMint}) {
+  const mint = seed => PublicKey.createWithSeed(sponsor,seed,TOKEN_PROGRAM_ID);
+  if (!(await mint('ballerz-transfer-winger-v1')).equals(playerMint)
+      || !(await mint('ballerz-transfer-test-bb-v1')).equals(bbMint))
+    throw new Error('A registered purchase grant ledger is required for this player.');
+}
+
+export async function signTrial(rpc, sponsor, seller, buyer, assets, {ledger,reviewedTerms}={}) {
   const version = Keypair.generate();
   const rent = await rpc.getMinimumBalanceForRentExemption(MULTISIG_SIZE);
   const block = await rpc.getLatestBlockhash('confirmed');
   const listing = {...assets,...block,sponsor:sponsor.publicKey,seller:seller.publicKey,
-    version:version.publicKey,price:100000,wages:30000};
+    version:version.publicKey,price:reviewedTerms?.price ?? 100000,wages:reviewedTerms?.wages ?? 30000};
+  if (ledger) {
+    await ledger.assertNetwork(rpc);
+    const quote=ledger.quote(listing,buyer.publicKey);
+    if (!isDeepStrictEqual(quote,reviewedTerms)) throw new Error('Review the current grant settlement before signing.');
+    listing.grant=quote.grant;
+  }
+  else {
+    if (listing.grant || reviewedTerms) throw new Error('A grant quote requires its operator ledger.');
+    await requireLegacyAssets(listing);
+  }
   const publication = publishListing(listing,rent);
   publication.sign(sponsor,seller,version);
   const purchase = purchaseListing(listing,buyer.publicKey);
   purchase.sign(sponsor,seller,buyer);
-  return {listing,buyer:buyer.publicKey,publication:publication.serialize().toString('base64'),
+  const trial = {listing,buyer:buyer.publicKey,publication:publication.serialize().toString('base64'),
     purchase:purchase.serialize().toString('base64')};
+  // Commit the sole authorized revision before releasing spendable bytes.
+  if (ledger) ledger.reserve(trial,bs58.encode(purchase.signature));
+  return trial;
 }
 
 export function parseTrial(json) {
@@ -101,7 +122,7 @@ export async function submitSigned(rpc,encoded,listing) {
   return {record,signature,tx};
 }
 
-export async function settleTrial(rpc,trial) {
+export async function settleTrial(rpc,trial,ledger) {
   const published = Transaction.from(Buffer.from(trial.publication,'base64'));
   const purchase = Transaction.from(Buffer.from(trial.purchase,'base64'));
   const {lamports} = SystemInstruction.decodeCreateAccount(published.instructions[0]);
@@ -109,8 +130,35 @@ export async function settleTrial(rpc,trial) {
       || !published.serializeMessage().equals(publishListing(trial.listing,lamports).serializeMessage())
       || !purchase.serializeMessage().equals(purchaseListing(trial.listing,trial.buyer).serializeMessage()))
     throw new Error('Signed listing and purchase must match the approved terms.');
-  await submitSigned(rpc,trial.publication,trial.listing);
-  const {record,signature,tx} = await submitSigned(rpc,trial.purchase,trial.listing);
-  return {signature,playerMint:trial.listing.playerMint.toBase58(),bbMint:trial.listing.bbMint.toBase58(),
-    ...verifyTransfer(record,tx,trial.listing,trial.buyer)};
+  const reference = bs58.encode(purchase.signature);
+  if (ledger) {
+    await ledger.assertNetwork(rpc);
+    const receipt = ledger.reserve(trial,reference);
+    if (receipt) return receipt;
+  } else {
+    if (trial.listing.grant) throw new Error('A grant quote requires its operator ledger.');
+    await requireLegacyAssets(trial.listing);
+  }
+  try {
+    await submitSigned(rpc,trial.publication,trial.listing);
+    const {record,signature,tx} = await submitSigned(rpc,trial.purchase,trial.listing);
+    const receipt = {signature,playerMint:trial.listing.playerMint.toBase58(),bbMint:trial.listing.bbMint.toBase58(),
+      ...verifyTransfer(record,tx,trial.listing,trial.buyer)};
+    return ledger ? ledger.finalize(receipt,trial.buyer) : receipt;
+  } catch (error) {
+    if (ledger) {
+      // A timeout alone cannot release a sale. Check finalized height first
+      // so an absent history response cannot race the last valid block.
+      const height = await rpc.getBlockHeight('finalized');
+      const status = (await rpc.getSignatureStatuses([reference],{searchTransactionHistory:true})).value[0];
+      if (status?.confirmationStatus==='finalized' && status.err) ledger.release(reference);
+      else if (!status && height>trial.listing.lastValidBlockHeight &&
+          !await rpc.getTransaction(reference,{commitment:'finalized',maxSupportedTransactionVersion:0})) {
+        const {playerMint,seller} = trial.listing;
+        const title = await getAccount(rpc,getAssociatedTokenAddressSync(playerMint,seller),'finalized');
+        if (title.amount===1n && title.owner.equals(seller) && title.mint.equals(playerMint)) ledger.release(reference);
+      }
+    }
+    throw error;
+  }
 }

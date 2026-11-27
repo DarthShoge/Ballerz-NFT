@@ -16,6 +16,7 @@ import { openStore } from '../src/local-store.js';
 import { cancelCurrentListing, purchaseListing } from '../src/player-transfer.js';
 import { signTrial, setupTransferTrial, settleTrial, submitSigned } from '../scripts/transfer-trial.mjs';
 import { managerListingJourney } from './manager-listing-browser.mjs';
+import { grantSaleJourney } from './grant-sales.mjs';
 
 async function playFixture(store, accounts) {
   const now = Date.now();
@@ -183,6 +184,9 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   });
 
   const [seller,buyer] = clubKeys;
+  await t.test('grant-funded sales reconcile independent losses, connected carry and resale once',async()=>{
+    await grantSaleJourney(rpc,payer,world);
+  });
   const other = Keypair.generate();
   const provision = () => setupTransferTrial(rpc,payer,seller.publicKey,[buyer.publicKey,other.publicKey]);
   // Keep the validator alive until both callers have finished confirmation.
