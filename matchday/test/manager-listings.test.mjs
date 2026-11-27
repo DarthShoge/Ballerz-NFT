@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { openListingDesk, listingApi } from '../src/manager-listings.js';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 
 test('seller approval is bound to terms, title, network, revision and the last valid block',async t=>{
   const sponsor=Keypair.generate(), seller=Keypair.generate();
@@ -52,4 +55,19 @@ test('seller approval is bound to terms, title, network, revision and the last v
 
 test('an unconfigured market reports its availability to the manager',async()=>{
   assert.equal((await listingApi(new Request('http://local/api/listings'),null)).status,503);
+});
+
+test('match centre serves the wallet page and stays available when sponsorship is offline',{timeout:15000},async t=>{
+  const server=spawn(process.execPath,[fileURLToPath(new URL('../server.js',import.meta.url))],{
+    env:{...process.env,HOST:'127.0.0.1',PORT:'0',FIXTURE_DB:':memory:',BALLERZ_LISTING_SPONSOR:'missing-pilot-sponsor.json'},
+    stdio:['ignore','pipe','pipe']
+  });
+  const stopped=once(server,'close');
+  t.after(async()=>{server.kill();await stopped;});
+  const [line]=await once(server.stdout,'data');
+  const origin=String(line).match(/http:\/\/127\.0\.0\.1:\d+/)[0];
+  assert.match(await (await fetch(origin)).text(),/href="\/listings.html"/);
+  assert.equal((await fetch(origin+'/api/listings')).status,503);
+  assert.match(await (await fetch(origin+'/listings.html')).text(),/Connect seller wallet/);
+  assert.match((await fetch(origin+'/vendor/solana.js')).headers.get('content-type'),/javascript/);
 });

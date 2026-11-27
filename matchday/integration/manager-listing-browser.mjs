@@ -69,14 +69,14 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
     const button=name=>page.getByRole('button',{name,exact:true});
     await button('Connect seller wallet').click();
     await button('Review listing').click();
-    assert.match(await page.locator('#terms').innerText(),/130,000 test BB/);
+    await page.locator('#terms').getByText('130,000 test BB',{exact:true}).waitFor();
     await button('Approve listing in wallet').click();
     await page.getByText(/Manager declined/).waitFor();
     assert.equal((await request('')).data.last,null);
     await page.locator('#price').fill('110000');
     assert.ok(await page.locator('#approval').isHidden());
     await button('Review listing').click();
-    assert.match(await page.locator('#terms').innerText(),/140,000 test BB/);
+    await page.locator('#terms').getByText('140,000 test BB',{exact:true}).waitFor();
     deny=false;
     const posted=page.waitForResponse(r=>r.url().endsWith('/approve'));
     await button('Approve listing in wallet').click();

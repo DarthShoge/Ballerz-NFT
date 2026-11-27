@@ -17,11 +17,16 @@ const dataDir = new URL('./data/', import.meta.url);
 mkdirSync(dataDir, {recursive:true});
 const db = openStore(process.env.FIXTURE_DB || fileURLToPath(new URL('fixtures.sqlite', dataDir)));
 const sponsorFile = process.env.BALLERZ_LISTING_SPONSOR;
-const desk = sponsorFile ? await openListingDesk(
-  new Connection(process.env.BALLERZ_DEVNET_RPC || 'https://api.devnet.solana.com','finalized'),
-  Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(sponsorFile,'utf8')))),
-  process.env.BALLERZ_LISTING_DB || fileURLToPath(new URL('listings.sqlite',dataDir))
-) : null;
+let listingDesk;
+function getListingDesk() {
+  if (!sponsorFile) return null;
+  listingDesk ??= Promise.resolve().then(() => openListingDesk(
+    new Connection(process.env.BALLERZ_DEVNET_RPC || 'https://api.devnet.solana.com','finalized'),
+    Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(sponsorFile,'utf8')))),
+    process.env.BALLERZ_LISTING_DB || fileURLToPath(new URL('listings.sqlite',dataDir))
+  )).catch(() => { listingDesk=undefined; return null; });
+  return listingDesk;
+}
 const worldStart = db.worldStart(configuredStart);
 const playtest = process.env.BALLERZ_PLAYTEST_CONTROLS === '1';
 const publicDir = new URL('./public/', import.meta.url);
@@ -49,7 +54,7 @@ const server = http.createServer(async (req, res) => {
       }
       const request = new Request(url, {method:req.method, headers:req.headers, body: parts.length ? Buffer.concat(parts) : undefined});
       const response = url.pathname.startsWith('/api/listings')
-        ? await listingApi(request,desk) : await fixtureApi(request, db, {worldStart, playtest});
+        ? await listingApi(request,await getListingDesk()) : await fixtureApi(request, db, {worldStart, playtest});
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(await response.text());
       return;
