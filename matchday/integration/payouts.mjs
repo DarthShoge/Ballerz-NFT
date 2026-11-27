@@ -8,11 +8,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Connection, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, createTransferCheckedInstruction, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, createTransferCheckedInstruction, getAssociatedTokenAddressSync, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { appearanceBatch, treasuryAddresses, fundTreasury } from '../src/devnet-settlement.js';
 import { approveFixture } from '../src/fixture-appearance.js';
 import { fixtureApi } from '../src/fixtures.js';
 import { openStore } from '../src/local-store.js';
+import { cancelCurrentListing, purchaseListing } from '../src/player-transfer.js';
+import { signTrial, setupTransferTrial, settleTrial, submitSigned } from '../scripts/transfer-trial.mjs';
 
 async function playFixture(store, accounts) {
   const now = Date.now();
@@ -64,6 +66,10 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   t.after(async () => {
     for (const child of children) child.kill();
     store.close();
+    // web3.js keeps the confirmation socket alive briefly after the final
+    // signature. Disconnect it before taking its validator offline.
+    rpc._rpcWebSocket.setAutoReconnect(false);
+    rpc._rpcWebSocket.close();
     validator.kill('SIGTERM');
     await stopped.catch(() => {});
     rmSync(world,{recursive:true,force:true});
@@ -173,5 +179,33 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
     const retry = await worker(id,'recover').done;
     assert.equal(retry.result.signature,paid.result.signature);
     assert.deepEqual(await balances(),[0n,24000n,24000n]);
+  });
+
+  await t.test('a cancelled listing and losing buyer move no funds; the winner receives the only title', async () => {
+    const [seller,buyer] = clubKeys;
+    const other = Keypair.generate();
+    const assets = await setupTransferTrial(rpc,payer,seller.publicKey,[buyer.publicKey,other.publicKey]);
+    const cancelled = await signTrial(rpc,payer,seller,buyer,assets);
+    await submitSigned(rpc,cancelled.publication,cancelled.listing);
+    const revoke = new Transaction().add(cancelCurrentListing(cancelled.listing));
+    await sendAndConfirmTransaction(rpc,revoke,[payer,seller],{commitment:'finalized'});
+    await assert.rejects(submitSigned(rpc,cancelled.purchase,cancelled.listing),/simulation failed/i);
+    const fresh = await signTrial(rpc,payer,seller,buyer,assets);
+    await submitSigned(rpc,fresh.publication,fresh.listing);
+    const rival = purchaseListing(fresh.listing,other.publicKey);
+    rival.sign(payer,seller,other);
+    const offers = [fresh,{...fresh,buyer:other.publicKey,purchase:rival.serialize().toString('base64')}];
+    const outcomes = await Promise.allSettled(offers.map(offer => settleTrial(rpc,offer)));
+    assert.equal(outcomes.filter(o => o.status === 'fulfilled').length,1);
+    const won = outcomes.findIndex(o => o.status === 'fulfilled');
+    const receipt = outcomes[won].value;
+    assert.equal(receipt.buyerBB.after,'0');
+    assert.equal(receipt.sellerBB.after,'100000');
+    assert.equal(receipt.wageReserve.after,'30000');
+    assert.equal(receipt.buyerTitle.after,'1');
+    assert.equal(receipt.sellerTitle.after,'0');
+    const loser = getAssociatedTokenAddressSync(assets.bbMint,offers[1-won].buyer);
+    assert.equal((await rpc.getTokenAccountBalance(loser,'finalized')).value.amount,'130000');
+    assert.deepEqual(await settleTrial(rpc,offers[won]),receipt);
   });
 });

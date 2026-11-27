@@ -76,6 +76,14 @@ Select an outfield shirt under **Player selection** or in **Touchline** to adjus
 
 During a stoppage, players run from their current positions into the restart setup. Throw-ins bring short passing options to the touchline, defenders can form a wall near goal, and corner targets and markers prepare their runs. The ball stays at the restart spot until play resumes.
 
+## First player transfer on Devnet
+
+With the three dedicated matchday Devnet demo keys in place and SOL in the fee payer, run `node scripts/first-transfer.mjs play`. Northbank lists a newly issued, single-supply test winger. Eastport approves 100,000 trial BB to Northbank and 30,000 to the operator-controlled payroll account. Title, fee and wage reserve settle in one transaction. The trial BB mint is separate from fixture rewards. Both trial mints revoke minting and have zero decimals and no freeze authority.
+
+The two club keys and the sponsor sign the closing terms. The listing's displayed expiry is its last valid block height. A fresh two-signature SPL multisig identifies each listing version. The seller can revoke the current delegate or replace it with a new listing. The transaction signatures bind the buyer, seller, asset, price, wages and blockhash. Both official club token accounts and the payroll account are checked in the transaction. The demo uses distinct test wallets operated locally and assumes a tradeable player, eligible clubs and zero deductions. Production permissions, wage disbursement, grant recovery and sporting registration remain tracked in the marketplace epic.
+
+The signed messages are saved in the private Devnet key directory before either is submitted. Repeating `play` reconciles those exact signatures. `node scripts/first-transfer.mjs status` reads the purchase signature without submitting anything. Keep the signed journal private while the offer is live. A finalized receipt reports both token mints, title, each BB balance change and the effective block time. [Marketplace epic](https://github.com/DarthShoge/Ballerz-NFT/issues/63)
+
 ## How the match engine works
 
 The server resolves one action at a time on a 105 × 68 metre pitch. Each action advances the match clock. A successful action can keep possession across several passes. An interception, tackle, restart or shot can change who controls the ball. Formation, work rate, condition and pressing affect how players take up space and when they close down.
