@@ -4,6 +4,8 @@
 
 [Production backlog — 23 epics and 111 tasks](backlog.md) · [Mandatory testing policy](../../CONTRIBUTING.md) · [Founder decisions and worked examples](founder-rules.md)
 
+The [live studio project](https://github.com/users/DarthShoge/projects/1) tracks repository issues under their parent epics. The [first iteration](https://github.com/users/DarthShoge/projects/1/views/3) runs from 27 November through 10 December 2026. [PR #71](https://github.com/DarthShoge/Ballerz-NFT/pull/71) carries the payout recovery, rollback and duplicate-payment work. The [main-branch ruleset](https://github.com/DarthShoge/Ballerz-NFT/rules/28231045) requires the matchday and Solana checks before merge.
+
 ## What already exists
 
 Matchday PR #2 supplied the server-run match, two tactical phases, fixture scheduling, submissions, AI practice, live management, match reports, replay and SQLite persistence. Preserve its normal entry points and test against them. The subsequent local implementation at `3e81fe3` settled one fixture on Solana Devnet with standard System, SPL Token and Memo programs. Six of the 73 tests at that baseline cover appearance rules and receipt verification. Automated recovery currently uses a simulated RPC response. Public Devnet verified a real payment and duplicate handling. A custom programme for custody, transfers, expiry, payroll and funded reward enforcement is future work. Legacy Solidity/Truffle code is historical reference for this Solana roadmap. [Matchday](../../matchday/README.md) · [Merged work](https://github.com/DarthShoge/Ballerz-NFT/pull/2) · [Finalized Devnet fixture](https://explorer.solana.com/tx/57abjYGxQvbtLN1g4QsJQ6mCeEpovyr5fEzqxXBtP1AEiDZD9EUwGcxVxqPzfr17QTqECpADwVqBqvhzoLeJhQjL?cluster=devnet)
