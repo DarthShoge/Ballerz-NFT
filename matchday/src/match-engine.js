@@ -11,7 +11,7 @@ import {approachRestart, planRestart, restartSpeed, timeRestartRuns} from './res
 import { defensiveExit, defendDelivery, misplayedBallExit } from './match-deliveries.js';
 import {
   abandonment, applyRequestedSubstitutions, dismissPlayer, injurePlayer, makeFatigueSubstitutions, matchRating, playerPerformance,
-  prepareTeam, replaceUnavailablePlayers
+  prepareTeam, replaceUnavailablePlayers, keepsAppearanceOnAbandonment
 } from './match-rules.js';
 
 const HALF = 45 * 60;
@@ -772,7 +772,8 @@ export function matchResult(game) {
   })));
   return {
     engineVersion: ENGINE_VERSION, durationSeconds: round(game.second), ballInPlaySeconds: round(ballInPlay),
-    score, stats, events, timeline, actions, analysis, performances, ...(game.abandoned ?? {})
+    score, stats, events, timeline, actions, analysis, performances, ...(game.abandoned ?? {}),
+    ...(game.abandoned ? {abandonmentEligible: game.teams.map(keepsAppearanceOnAbandonment)} : {})
   };
 }
 

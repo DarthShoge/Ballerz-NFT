@@ -43,6 +43,7 @@ function view(id, state, side, time, after, playtest, includeTactics) {
     ...catalog, ...(includeTactics ? tacticCatalog : {}), id, side, joined: Boolean(state.computerAway || state.managers[1]),
     computerAway: Boolean(state.computerAway),
     ready: state.plans.map(Boolean), result: recordedMatchReport(state.result), teamSheetLocked,
+    ...(state.appearanceReceipt ? {appearanceReceipt:state.appearanceReceipt} : {}),
     schedule: schedule ?? null, live: liveFixtureView(state.live, after),
     ...(playtest && side === 0 ? {playtestControls: true} : {}),
     plans: state.plans.map((plan, i) => i === side || state.result ? plan : null),

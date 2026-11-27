@@ -6,13 +6,34 @@ Two managers take charge of Northbank Athletic and Eastport Rovers. Each club ha
 
 Choose **Play AI** to kick off immediately with the team sheet shown in the match centre. Expand **Schedule a fixture** to choose a kickoff time for a multiplayer playtest. Eastport selects a starting XI by position and opens in a counterattacking 4-4-2. Its manager reviews the score and fatigue at 55, 69 and 80 minutes, adjusts the team instructions and can queue a like-for-like substitution at a stoppage. **Invite a manager** starts a two-manager friendly.
 
-From this folder, use Node.js 22.13 or newer. There are no package dependencies.
+From this folder, use Node.js 22.13 or newer. The match engine and web server use Node built-ins. The optional Devnet settlement CLI uses the Solana packages in the lockfile.
 
 ```sh
 node server.js
 ```
 
 Open http://127.0.0.1:4173 and create a friendly to manage Northbank. Copy the away invitation and open it in another browser profile to manage Eastport. Each browser remembers its own manager key. Keep the fixture URL bookmarked to revisit the report with that browser profile.
+
+### Run a funded Devnet fixture
+
+Run these commands in `matchday`. Install the locked packages, then print the public fee-payer address and supply it with Devnet SOL for transaction fees and account rent. The observed setup and first match used less than 0.01 Devnet SOL.
+
+```sh
+pnpm install --frozen-lockfile
+node scripts/devnet-appearances.mjs wallet
+node scripts/devnet-appearances.mjs play
+node scripts/devnet-appearances.mjs settle FIXTURE_ID
+```
+
+`play` creates the demo treasury if needed, schedules one new two-manager fixture, submits both default sheets, and uses the existing playtest clock to reach full time. It prints the fixture ID before kickoff. It settles that fixture and immediately repeats settlement. After a crash or restart, use `settle` with the original ID. Each invocation of `play` creates a different fixture.
+
+For browser play, run `node scripts/devnet-appearances.mjs setup` once, start the local match server, schedule a two-manager fixture, and run `node scripts/devnet-appearances.mjs approve FIXTURE_ID` before lineup lock. Both commands must use the same key directory and `FIXTURE_DB` as the corresponding demo or local server. Have the managers submit their teams. After full time, run `settle FIXTURE_ID` and refresh the match report to see the public receipt.
+
+The CLI pins the Devnet genesis hash. It keeps three dedicated test keys under `%LOCALAPPDATA%/Ballerz/matchday-devnet` on Windows or `~/.local/share/Ballerz/matchday-devnet` elsewhere. `BALLERZ_DEVNET_KEYS` overrides the directory and `BALLERZ_DEVNET_RPC` can select a different Devnet RPC. Keep the private files local. The payer acts as the match operator and test treasury authority. Each named club has its own wallet and token account. Setup atomically issues 160,000 whole test BB to the treasury and revokes mint authority. Minting is a one-time test setup and earns a club no appearance payment.
+
+The match runs on the matchday server. The trusted operator binds the clubs before kickoff and attests its final result. Solana executes the SPL Token transfers. One atomic transaction creates a permanent zero-data receipt owned by the Memo program at a deterministic address for the fixture and operator, pays 8,000 BB per eligible side and records the result in a memo. The receipt creation cannot succeed twice. Only timely submitted sheets qualify. A single pre-kickoff forfeit pays the ready side; a double forfeit pays zero. Abandonments use per-side engine evidence under the existing seven-player rule. Settlement fails closed on incomplete legacy evidence.
+
+Verification checks the finalized transaction, signer, receipt creation, memo, mint, recipients and exact pre/post token-balance changes. A retry recovers the original finalized signature from the receipt history. Use the same treasury identity across restarts. This pilot trusts the operator’s signing key and fixture database; deployed standard Solana programs enforce the transaction, while the operator authorizes the sporting outcome.
 
 To play with another device on the same trusted network, start the server in PowerShell with the following commands. Open the host computer's LAN address on port 4173 **before** creating the fixture so the copied invitation points to a reachable address.
 
@@ -78,4 +99,4 @@ node scripts/benchmark.mjs 120 20261201
 
 The server validates club membership, formation and eleven unique selections. Unsubmitted tactics stay in the manager's browser. In friendlies, each team sheet locks on submission and the match starts when both managers are ready. Locked team sheets stay hidden from the opponent until full time. A version check protects simultaneous submissions, so both managers see the same result.
 
-Both modes use two fixed squads. Scheduled playtest fixtures are individual matches and have no league standings, BB settlement or outage rescheduling. League administration, transfers and Solana ownership belong to later development.
+Both modes use two fixed squads. Scheduled playtest fixtures support optional operator-approved Devnet appearance payments. League standings, outage rescheduling, transfers and Solana club ownership belong to later development.
