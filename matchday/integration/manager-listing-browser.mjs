@@ -50,6 +50,8 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
           return window.solanaWeb3.Transaction.from(Uint8Array.from(atob(await window.testSign(wire)),c=>c.charCodeAt(0)));
         }
       };
+      window.solflare=Object.create(window.solana);
+      window.solflare.connect=async()=>undefined;
     },{address});
     const origin='http://127.0.0.1:'+server.address().port;
     const request=async(path,body)=>{
@@ -65,9 +67,13 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
     const signed=wire.serialize({requireAllSignatures:false}).toString('base64');
     assert.equal((await request('/approve',{...packet,signed:packet.quote.wire})).status,403);
     assert.equal((await request('/approve',{...packet,quote:{...packet.quote,price:1},signed})).status,400);
-    await page.goto(origin+'/listings.html');
+    await page.goto(origin+'/listings.html?wallet=solflare&price=100000');
     const button=name=>page.getByRole('button',{name,exact:true});
-    await button('Connect seller wallet').click();
+    await page.evaluate(()=>{window.savedSolflare=window.solflare;delete window.solflare;});
+    await button('Connect Solflare').click();
+    await page.getByText(/with Solflare installed/).waitFor();
+    await page.evaluate(()=>{window.solflare=window.savedSolflare;});
+    await button('Connect Solflare').click();
     await button('Review listing').click();
     await page.locator('#terms').getByText('130,000 test BB',{exact:true}).waitFor();
     await button('Approve listing in wallet').click();
@@ -100,7 +106,7 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
     assert.equal(market.active.price,110000);
     assert.equal(market.active.signature,receipt.signature);
     assert.equal((await request('/approve',{...packet,signed})).status,409);
-    await page.reload();await button('Connect seller wallet').click();
+    await page.goto(origin+'/listings.html');await button('Connect seller wallet').click();
     await button('Review cancellation').click();await button('Approve cancellation in wallet').click();
     await page.getByText(/Approval recorded/).waitFor();
     market=await finalized();

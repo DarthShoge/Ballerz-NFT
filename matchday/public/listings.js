@@ -1,5 +1,10 @@
 import { reviewedListing } from './reviewed-listing.js';
 const el = id => document.getElementById(id);
+const params=new URLSearchParams(location.search);
+const useSolflare=params.get('wallet')==='solflare';
+if (useSolflare) el('connect').textContent='Connect Solflare';
+const suggestedPrice=Number(params.get('price'));
+if (Number.isSafeInteger(suggestedPrice) && suggestedPrice>0) el('price').value=String(suggestedPrice);
 let wallet, seller, state, draft, busy=false, generation=0;
 async function api(path='',body) {
   const response=await fetch('/api/listings'+path,body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
@@ -37,9 +42,12 @@ async function run(fn) {
   finally { busy=false; availability(); }
 }
 el('connect').onclick=()=>run(async()=>{
-  const provider=window.phantom?.solana || window.solana;
+  const provider=useSolflare ? window.solflare : (window.phantom?.solana || window.solana);
+  if (useSolflare && !provider?.signTransaction) throw Error('Open this page in your Ballerz browser profile with Solflare installed.');
   if (!provider?.signTransaction) throw Error('Open this page in a Solana wallet browser or connect a compatible wallet extension.');
-  const {publicKey}=await provider.connect();
+  const connection=await provider.connect();
+  const publicKey=provider.publicKey ?? connection?.publicKey;
+  if (!publicKey) throw Error('The wallet did not return a public address.');
   if (wallet!==provider) {
     const reset=()=>{invalidate();seller=undefined;state=null;el('account').textContent='Wallet changed. Reconnect to review terms.';availability();};
     provider.on?.('accountChanged',reset); provider.on?.('disconnect',reset);
