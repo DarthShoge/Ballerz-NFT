@@ -4,11 +4,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { sportingRegister } from '../src/sporting-register.js';
-import { loanTerms, reviewLoan } from '../src/loan-review.js';
+import { loanNetwork, loanTerms, reviewLoan } from '../src/loan-review.js';
+import { DEVNET_GENESIS } from '../src/devnet-settlement.js';
 import { GAME_WEEK_MS } from '../src/world-clock.js';
 
 const startAt=Date.UTC(2027,0,1);
 const request={player:'northbank-7',borrower:'northbank',startAt,endAt:startAt+4*GAME_WEEK_MS};
+
+test('remote loan review requires TLS and pins Devnet',()=>{
+  assert.equal(loanNetwork('http://127.0.0.1:8899','validator'),'validator');
+  assert.equal(loanNetwork('https://example.org','validator'),DEVNET_GENESIS);
+  assert.throws(()=>loanNetwork('http://example.org','validator'),/HTTPS/);
+});
 
 test('ordinary loan quotes use the published clock and conserve the wage split',()=>{
   const quote=extra=>loanTerms('eastport',{...request,...extra},startAt);
@@ -64,4 +71,13 @@ test('a loan quote requires matching finalized title and cannot change sporting 
   await assert.rejects(review(),/registered owner/);
   await assert.rejects(review({...pilot,sponsor:'different'}),/match this pilot/);
   assert.equal(changes(),before);
+  balance=1n;
+  const snapshot=rpc.getMultipleAccountsInfoAndContext;
+  rpc.getMultipleAccountsInfoAndContext=async(...args)=>{
+    const evidence=await snapshot(...args);
+    register.observe({...sale,reference:'new-purchase'});
+    register.finalize('new-purchase',{slot:26,position:0,effectiveAt:startAt},()=>startAt);
+    return evidence;
+  };
+  await assert.rejects(review(),/changed during review/);
 });

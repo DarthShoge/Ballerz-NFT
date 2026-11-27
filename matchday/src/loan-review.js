@@ -2,6 +2,15 @@ import { PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solana/spl-token';
 import { clubs } from './football.js';
 import { GAME_WEEK_MS } from './world-clock.js';
+import { DEVNET_GENESIS } from './devnet-settlement.js';
+
+export function loanNetwork(endpoint, validatorGenesis) {
+  const {protocol,hostname} = new URL(endpoint);
+  const loopback = ['127.0.0.1','localhost','[::1]'].includes(hostname);
+  if (protocol !== 'https:' && !(loopback && protocol === 'http:'))
+    throw new Error('Remote loan verification requires an HTTPS RPC endpoint.');
+  return (loopback && validatorGenesis) || DEVNET_GENESIS;
+}
 
 export function loanTerms(parent, {borrower, startAt, endAt, borrowerWageBps = 10000}, now) {
   if (borrower === parent || !clubs.some(club => club.id === borrower))
@@ -23,10 +32,11 @@ export function loanTerms(parent, {borrower, startAt, endAt, borrowerWageBps = 1
 
 // A review describes proposed terms. Activation requires a separate agreement.
 export async function reviewLoan(db, rpc, config, request, clock = Date.now) {
-  const row = db.prepare(`SELECT p.genesis,p.bb,p.sponsor,p.mint,s.slot,s.reference,s.buyer AS parent,
+  const latest = db.prepare(`SELECT p.genesis,p.bb,p.sponsor,p.mint,s.slot,s.reference,s.buyer AS parent,
       json_extract(s.terms,'$.buyer') AS wallet
     FROM sporting_sales s JOIN sporting_players p USING(player)
-    WHERE p.player=? AND s.status='finalized' ORDER BY s.slot DESC,s.position DESC LIMIT 1`).get(request.player);
+    WHERE p.player=? AND s.status='finalized' ORDER BY s.slot DESC,s.position DESC LIMIT 1`);
+  const row = latest.get(request.player);
   if (!row) throw new Error('A finalized player registration is required.');
   if (row.genesis !== config.genesis || row.bb !== config.bbMint || row.sponsor !== config.sponsor ||
       await rpc.getGenesisHash() !== row.genesis) throw new Error('Loan review does not match this pilot.');
@@ -38,10 +48,13 @@ export async function reviewLoan(db, rpc, config, request, clock = Date.now) {
   });
   const mint = unpackMint(mintAddress, snapshot.value[0]);
   const title = unpackAccount(tokenAddress, snapshot.value[1]);
-  if (snapshot.context.slot < row.slot || !mint.isInitialized || mint.decimals || mint.supply !== 1n ||
+  if (!Number.isSafeInteger(snapshot.context.slot) || snapshot.context.slot < row.slot ||
+      !mint.isInitialized || mint.decimals || mint.supply !== 1n ||
       mint.mintAuthority || mint.freezeAuthority || !title.isInitialized || title.isFrozen ||
       !title.owner.equals(owner) || !title.mint.equals(mintAddress) || title.amount !== 1n)
     throw new Error('The finalized title does not match the registered owner.');
+  if (latest.get(request.player)?.reference !== row.reference)
+    throw new Error('Player registration changed during review. Request fresh terms.');
   return {
     status: 'proposal', player: request.player, mint: row.mint, genesis: row.genesis,
     ownerWallet: row.wallet, ownershipReference: row.reference, checkedSlot: snapshot.context.slot,
