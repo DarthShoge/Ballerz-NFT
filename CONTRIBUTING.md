@@ -6,6 +6,14 @@
 
 Link the feature to its [backlog ID](docs/studio/backlog.md) and source decision. Identify who acts, who has authority, the prior state, the expected observable result and what must remain true after failure. Write acceptance examples using actual units, clocks and identifiers. For an economic rule, name the payer, payee, asset, custodian, enforceable restriction and finality requirement. For a balancing experiment, record the control, seed, rule version, target and what result would cause us to change the parameter.
 
+## Security review
+
+At issue triage, apply `security` when acceptance depends on who may act, which assets or private data they can reach, or how the system preserves financial or competitive integrity. Include signing interfaces, custody and recovery, fee sponsorship, delegated agents, sensitive data, build credentials and releases. Keep the gameplay and engineering labels alongside it.
+
+For each affected boundary, record the protected asset or data, the authorised actor, the component that enforces the rule and the consequence of failure. Link an executable rejection test to the PR. For transactions, demonstrate exactly which terms a signature covers, who pays, and what happens to balances, title and authority after cancellation, replay, concurrent requests or an uncertain RPC response. For private data, exercise the public response and the unauthorised viewer. Keep keys, signed live transactions and private reports out of public issues and CI artifacts.
+
+At funded release review, record a reviewer independent of the implementation for custody, signing, treasury and upgrade changes. Attach the tested commit, open findings, owners, and the pause and reconciliation procedure. An unresolved path to unauthorised asset movement or private data disclosure blocks a funded release. The label tracks work that needs review. The linked tests and review decision establish what was verified.
+
 ## Evidence required
 
 | Layer | Use it to prove | Examples |

@@ -33,7 +33,8 @@ function transaction(listing) {
 function termsMemo(listing, action) {
   return new TransactionInstruction({programId:memoProgram, keys:[], data:Buffer.from(JSON.stringify({
     v:1, action, listing:listing.version.toBase58(), bb:listing.bbMint.toBase58(),
-    price:listing.price, wages:listing.wages, expires:listing.lastValidBlockHeight
+    price:listing.price, wages:listing.wages, expires:listing.lastValidBlockHeight,
+    disclosures:listing.disclosures
   }))});
 }
 
@@ -51,6 +52,17 @@ export function publishListing(listing, rent) {
 
 export function cancelCurrentListing(listing) {
   return createRevokeInstruction(ata(listing.playerMint,listing.seller),listing.seller);
+}
+
+export function cancelListingVersion(listing) {
+  const {sponsor, seller, playerMint, version} = listing;
+  const source = ata(playerMint,seller), witness = ata(playerMint,sponsor);
+  // The zero transfer requires this exact delegate. If a replacement won the
+  // race, the token program rejects the whole transaction before the revoke.
+  return transaction(listing).add(
+    createAssociatedTokenAccountIdempotentInstruction(sponsor,witness,sponsor,playerMint),
+    createTransferCheckedInstruction(source,playerMint,witness,version,0n,0,[seller,sponsor]),
+    cancelCurrentListing(listing), termsMemo(listing,'cancel'));
 }
 
 export function purchaseListing(listing, buyer) {

@@ -7,7 +7,7 @@ import { AccountLayout, AuthorityType, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE, M
   createMintToInstruction, createSetAuthorityInstruction, createTransferCheckedInstruction,
   getAssociatedTokenAddressSync as ata } from '@solana/spl-token';
 import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
-import { publishListing, purchaseListing } from '../src/player-transfer.js';
+import { cancelListingVersion, publishListing, purchaseListing } from '../src/player-transfer.js';
 
 test('underfunded wages roll back the fee and title; an expired signed purchase cannot close', () => {
   const svm = new LiteSVM().withSigverify(true).withBlockhashCheck(true);
@@ -42,6 +42,19 @@ test('underfunded wages roll back the fee and title; an expired signed purchase 
   const listing={sponsor,seller,playerMint,bbMint,version:version.publicKey,blockhash:svm.latestBlockhash(),
     lastValidBlockHeight:150,price:100000,wages:30000};
   send(publishListing(listing,rent(MULTISIG_SIZE)),home,version);
+  const replacement = Keypair.generate();
+  const revised = {...listing,version:replacement.publicKey,price:100001};
+  send(publishListing(revised,rent(MULTISIG_SIZE)),home,replacement);
+  const staleCancel = cancelListingVersion(listing);
+  staleCancel.sign(operator,home);
+  assert.ok(svm.sendTransaction(staleCancel) instanceof FailedTransactionMetadata);
+  assert.deepEqual(AccountLayout.decode(svm.getAccount(ata(playerMint,seller)).data).delegate,
+    replacement.publicKey);
+  send(cancelListingVersion(revised),home);
+  assert.equal(AccountLayout.decode(svm.getAccount(ata(playerMint,seller)).data).delegateOption,0);
+  const reopened = Keypair.generate();
+  listing.version=reopened.publicKey;
+  send(publishListing(listing,rent(MULTISIG_SIZE)),home,reopened);
   const signed = purchaseListing(listing,buyer);
   signed.sign(operator,home,away);
   function amount(mint,owner) {
