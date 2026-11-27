@@ -1,6 +1,7 @@
 // Fixture data and transaction submission for the closed, zero-commission trial.
 import bs58 from 'bs58';
-import { Keypair, PublicKey, SystemInstruction, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { Keypair, PublicKey, SystemInstruction, SystemProgram, Transaction } from '@solana/web3.js';
 import {
   AuthorityType, MINT_SIZE, MULTISIG_SIZE, TOKEN_PROGRAM_ID, createInitializeMint2Instruction,
   createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction, createSetAuthorityInstruction,
@@ -21,7 +22,23 @@ async function fixedMint(rpc,sponsor,seed,initialHoldings) {
         createMintToInstruction(mint,account,owner,amount));
     }
     tx.add(createSetAuthorityInstruction(mint,owner,AuthorityType.MintTokens,null));
-    await sendAndConfirmTransaction(rpc,tx,[sponsor],{commitment:'finalized'});
+    const block = await rpc.getLatestBlockhash('confirmed');
+    tx.feePayer=owner;
+    tx.recentBlockhash=block.blockhash;
+    tx.sign(sponsor);
+    try {
+      const signature=await rpc.sendRawTransaction(tx.serialize(),{preflightCommitment:'confirmed'});
+      const confirmed=await rpc.confirmTransaction({signature,...block},'finalized');
+      if (confirmed.value.err) throw new Error('Trial mint setup failed: '+JSON.stringify(confirmed.value.err));
+    } catch (error) {
+      // Another operator process can finish this same seeded setup first.
+      // Adopt only a finalized mint that passes the supply checks below.
+      if (!await rpc.getAccountInfo(mint,'confirmed')) throw error;
+      for (let attempt=0; !await rpc.getAccountInfo(mint,'finalized'); attempt++) {
+        if (attempt>=45) throw error;
+        await delay(500);
+      }
+    }
   }
   const info = await getMint(rpc,mint,'finalized');
   const supply = initialHoldings.reduce((sum,[,amount]) => sum + amount,0n);

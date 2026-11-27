@@ -12,6 +12,10 @@ Backlog ID, parent epic, release milestone, owner, decision link and implementat
 
 Describe the actor, preconditions, action and observable result. Include an invalid or boundary case. For an experiment, identify the control, metric and decision it will inform.
 
+## Security triage
+
+Apply `security` when the feature affects custody, authority, financial integrity, sensitive data, abuse controls or delivery credentials. Name the protected asset, authorised actor, enforcing component and a rejection case the reviewer can verify.
+
 ## Test evidence
 
 List each logical layer and the tests that will prove the behaviour there. Include the integration across layers. For chain changes record authority, expected balances or ownership, retry, rollback and finality checks. Record gaps and their owners.
