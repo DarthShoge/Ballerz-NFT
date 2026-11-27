@@ -1,5 +1,7 @@
 # ⚽ Ballerz ⚽
 
+[Studio delivery plan](docs/studio/README.md) · [Epics and tasks](docs/studio/backlog.md) · [Contribution and testing policy](CONTRIBUTING.md)
+
 Play the first two-manager fixture in [Ballerz Matchday](matchday/README.md). From the repository root, run `node matchday/server.js` with Node.js 22.13 or newer, then open http://127.0.0.1:4173.
 
 Ballerz is a NFT project that serves as the basis of the Ballerz football management on-chain sim game. 
