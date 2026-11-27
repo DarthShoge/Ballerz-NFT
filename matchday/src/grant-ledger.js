@@ -12,7 +12,7 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
     CREATE TABLE IF NOT EXISTS grant_market (id INTEGER PRIMARY KEY CHECK(id=1), genesis TEXT NOT NULL, treasury TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS purchase_grants (
       mint TEXT PRIMARY KEY, bb TEXT NOT NULL, sponsor TEXT NOT NULL, owner TEXT NOT NULL,
-      claim INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
+      funded INTEGER NOT NULL, claim INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS grant_sales (
       signature TEXT PRIMARY KEY, mint TEXT NOT NULL, revision INTEGER NOT NULL,
       journal TEXT NOT NULL, receipt TEXT, UNIQUE(mint,revision));`);
@@ -44,11 +44,12 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
     const held = reviewHolds.find(h=>h.clubs.includes(row.owner) && h.clubs.includes(address(buyer)));
     if (held) throw new Error('Sale held for operator review: '+held.reason+'. Appeal to the pilot operator.');
     const from = controlGroups.get(row.owner), to = controlGroups.get(address(buyer));
-    if (!from || !to) throw new Error('Club control requires operator review.');
+    if (typeof from!=='string' || !from.trim() || typeof to!=='string' || !to.trim())
+      throw new Error('Club control requires operator review.');
     const relationship = from === to ? 'connected' : 'independent';
     const grant = {revision:row.revision,claim:row.claim,relationship,
       treasury:address(treasury),buyer:address(buyer)};
-    return {playerMint:row.mint,bbMint:row.bb,sponsor:row.sponsor,seller:row.owner,
+    return {playerMint:row.mint,bbMint:row.bb,sponsor:row.sponsor,seller:row.owner,originalPurchaseGrant:row.funded,
       ...transferTerms({price,wages}),grant,...grantSettlement(price,row.claim,relationship)};
   }
   return {
@@ -61,8 +62,8 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
       if (!Number.isSafeInteger(claim) || claim<0) throw new Error('Invalid initial purchase grant.');
       if (playerMint.equals(await PublicKey.createWithSeed(sponsor,'ballerz-transfer-winger-v1',TOKEN_PROGRAM_ID)))
         throw new Error('The original unencumbered trial winger is reserved for legacy settlements.');
-      db.prepare('INSERT INTO purchase_grants(mint,bb,sponsor,owner,claim) VALUES(?,?,?,?,?)')
-        .run(address(playerMint),address(bbMint),address(sponsor),address(seller),claim);
+      db.prepare('INSERT INTO purchase_grants(mint,bb,sponsor,owner,funded,claim) VALUES(?,?,?,?,?,?)')
+        .run(address(playerMint),address(bbMint),address(sponsor),address(seller),claim,claim);
     },
     quote,
     pending(mint) {
@@ -73,7 +74,7 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
         const existing = db.prepare('SELECT journal,receipt FROM grant_sales WHERE signature=?').get(signature);
         const journal = JSON.stringify(trial);
         if (existing) {
-          if (existing.journal !== journal) throw new Error('Conflicting transfer journal.');
+          if (!isDeepStrictEqual(JSON.parse(existing.journal),JSON.parse(journal))) throw new Error('Conflicting transfer journal.');
           return existing.receipt ? JSON.parse(existing.receipt) : null;
         }
         const {grant} = quote(trial.listing,trial.buyer);
