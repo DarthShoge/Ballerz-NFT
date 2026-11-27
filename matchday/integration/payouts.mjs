@@ -15,6 +15,7 @@ import { fixtureApi } from '../src/fixtures.js';
 import { openStore } from '../src/local-store.js';
 import { cancelCurrentListing, purchaseListing } from '../src/player-transfer.js';
 import { signTrial, setupTransferTrial, settleTrial, submitSigned } from '../scripts/transfer-trial.mjs';
+import { managerListingJourney } from './manager-listing-browser.mjs';
 
 async function playFixture(store, accounts) {
   const now = Date.now();
@@ -181,10 +182,15 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
     assert.deepEqual(await balances(),[0n,24000n,24000n]);
   });
 
+  const [seller,buyer] = clubKeys;
+  const other = Keypair.generate();
+  const provision = () => setupTransferTrial(rpc,payer,seller.publicKey,[buyer.publicKey,other.publicKey]);
+  const [assets,concurrentSetup] = await Promise.all([provision(),provision()]);
+  assert.deepEqual(concurrentSetup,assets);
+  await t.test('a manager reviews, signs, recovers and cancels the listing in their browser', async () => {
+    await managerListingJourney(rpc,payer,seller,buyer,world);
+  });
   await t.test('a cancelled listing and losing buyer move no funds; the winner receives the only title', async () => {
-    const [seller,buyer] = clubKeys;
-    const other = Keypair.generate();
-    const assets = await setupTransferTrial(rpc,payer,seller.publicKey,[buyer.publicKey,other.publicKey]);
     const cancelled = await signTrial(rpc,payer,seller,buyer,assets);
     await submitSigned(rpc,cancelled.publication,cancelled.listing);
     const revoke = new Transaction().add(cancelCurrentListing(cancelled.listing));

@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { extname, join, relative } from 'node:path';
 import { fixtureApi, playDueFixtures } from './src/fixtures.js';
 import { openStore } from './src/local-store.js';
+import { createRequire } from 'node:module';
+import { Connection, Keypair } from '@solana/web3.js';
+import { listingApi, openListingDesk } from './src/manager-listings.js';
 
 const configuredEpoch = process.env.WORLD_START_UTC;
 const configuredStart = configuredEpoch === undefined ? null : Date.parse(configuredEpoch);
@@ -13,6 +16,12 @@ if (configuredEpoch !== undefined && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\
 const dataDir = new URL('./data/', import.meta.url);
 mkdirSync(dataDir, {recursive:true});
 const db = openStore(process.env.FIXTURE_DB || fileURLToPath(new URL('fixtures.sqlite', dataDir)));
+const sponsorFile = process.env.BALLERZ_LISTING_SPONSOR;
+const desk = sponsorFile ? await openListingDesk(
+  new Connection(process.env.BALLERZ_DEVNET_RPC || 'https://api.devnet.solana.com','finalized'),
+  Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(sponsorFile,'utf8')))),
+  process.env.BALLERZ_LISTING_DB || fileURLToPath(new URL('listings.sqlite',dataDir))
+) : null;
 const worldStart = db.worldStart(configuredStart);
 const playtest = process.env.BALLERZ_PLAYTEST_CONTROLS === '1';
 const publicDir = new URL('./public/', import.meta.url);
@@ -23,6 +32,9 @@ const assets = new Map(readdirSync(publicDir, {recursive:true, withFileTypes:tru
   const url = '/' + relative(path, file).replaceAll('\\', '/');
   return [url, {data:readFileSync(file), type:types[extname(entry.name)] || 'application/octet-stream'}];
 }));
+
+const web3 = createRequire(import.meta.url).resolve('@solana/web3.js');
+assets.set('/vendor/solana.js',{data:readFileSync(join(web3,'..','index.iife.min.js')),type:'application/javascript'});
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -36,7 +48,8 @@ const server = http.createServer(async (req, res) => {
         parts.push(part);
       }
       const request = new Request(url, {method:req.method, headers:req.headers, body: parts.length ? Buffer.concat(parts) : undefined});
-      const response = await fixtureApi(request, db, {worldStart, playtest});
+      const response = url.pathname.startsWith('/api/listings')
+        ? await listingApi(request,desk) : await fixtureApi(request, db, {worldStart, playtest});
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(await response.text());
       return;
