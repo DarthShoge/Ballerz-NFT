@@ -1,10 +1,11 @@
 import { fixtureClubs, validatePlan } from './football.js';
 import { computerPlan } from './computer-manager.js';
 import { clubWallets } from './club-wallets.js';
+import { fixtureLoans } from './fixture-loans.js';
 
 // Only the local settlement worker writes this register. Matchday managers
 // read public references and choose their XI through the existing fixture API.
-export function sportingRegister(db) {
+export function sportingRegister(db,clock=Date.now) {
   db.exec(`CREATE TABLE IF NOT EXISTS sporting_players (
       player TEXT PRIMARY KEY, mint TEXT UNIQUE NOT NULL, genesis TEXT NOT NULL, bb TEXT NOT NULL, sponsor TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sporting_sales (
@@ -21,14 +22,20 @@ export function sportingRegister(db) {
       throw new Error('Fixture database belongs to a different registration network, currency or sponsor.');
   }
   const wallets=clubWallets(db);
-  function project(state) {
-    if (!state.schedule) return false;
+  const loans=fixtureLoans(db);
+  function assignmentsAt(deadline) {
     const rows=db.prepare(`SELECT player,buyer,reference FROM (
       SELECT *,row_number() OVER (PARTITION BY player ORDER BY slot DESC,position DESC) AS ord
       FROM sporting_sales WHERE status='finalized' AND effectiveAt < ? AND observedAt < ?)
-      WHERE ord=1 ORDER BY player`).all(state.schedule.deadlineAt,state.schedule.deadlineAt);
-    if (!rows.length) return false;
+      WHERE ord=1 ORDER BY player`).all(deadline,deadline);
     const assignments=Object.fromEntries(rows.map(r=>[r.player,{club:r.buyer,reference:r.reference}]));
+    loans.apply(assignments,deadline);
+    return assignments;
+  }
+  function project(state) {
+    if (!state.schedule) return false;
+    const assignments=assignmentsAt(state.schedule.deadlineAt);
+    if (!Object.keys(assignments).length) return false;
     if (JSON.stringify(assignments)===JSON.stringify(state.registrations)) return false;
     state.registrations=assignments;
     const rosters=fixtureClubs(assignments);
@@ -39,8 +46,37 @@ export function sportingRegister(db) {
     }
     return true;
   }
+  function refreshOpen(after) {
+    const open=db.prepare(`SELECT id,state FROM fixtures WHERE json_extract(state,'$.schedule.deadlineAt')>?
+      AND json_extract(state,'$.result') IS NULL AND json_extract(state,'$.live') IS NULL`).all(after);
+    for (const row of open) {
+      const state=JSON.parse(row.state);
+      if (project(state)) db.prepare('UPDATE fixtures SET state=?,version=version+1 WHERE id=?').run(JSON.stringify(state),row.id);
+    }
+  }
+  const advance=now=>loans.processReturns(now,refreshOpen,assignmentsAt);
+  const confirmed=now=>loans.importConfirmed(now,refreshOpen,assignmentsAt);
+  atomic(()=>confirmed(clock()));
   return {
-    create(fn,state) { return atomic(()=>{project(state); return fn();}); },
+    confirmed,
+    advance(now) { if (loans.hasDue(now)) atomic(()=>advance(now)); },
+    create(fn,state,now) { return atomic(()=>{advance(now);project(state);return fn();}); },
+    finish(id,state,now,write) {
+      return atomic(()=>{
+        advance(now);
+        if (!write()) return false;
+        loans.recordMinutes(id,state);
+        if (loans.release(id)) refreshOpen(now);
+        return true;
+      });
+    },
+    canKickoffEarly(state,now) {
+      if (now>=state.schedule.deadlineAt || !loans.hasPeriods()) return true;
+      const eligible=fixtureClubs(assignmentsAt(now));
+      const scheduled=fixtureClubs(state.registrations);
+      const side=(rosters,player)=>rosters.findIndex(club=>club.squad.some(p=>p.id===player));
+      return loans.players().every(({player})=>side(eligible,player)===side(scheduled,player));
+    },
     observe({player,mint,genesis,bb,sponsor,reference,seller,buyer,terms}) {
       return atomic(()=>{
         checkPilot(genesis,bb,sponsor);
@@ -75,18 +111,15 @@ export function sportingRegister(db) {
         if (!changed.changes) return;
         // The registration and all still-editable squads change in the same
         // write transaction. An in-flight sheet then retries its version check.
-        const open=db.prepare(`SELECT id,state FROM fixtures WHERE json_extract(state,'$.schedule.deadlineAt')>?
-          AND json_extract(state,'$.result') IS NULL AND json_extract(state,'$.live') IS NULL`).all(observedAt);
-        for (const row of open) {
-          const state=JSON.parse(row.state);
-          if (project(state)) db.prepare('UPDATE fixtures SET state=?,version=version+1 WHERE id=?').run(JSON.stringify(state),row.id);
-        }
+        advance(observedAt);
+        refreshOpen(observedAt);
       });
     },
     status() {
       return db.prepare(`SELECT s.reference,s.player,s.seller,s.buyer,s.status,s.effectiveAt,
         (SELECT f.id FROM fixtures f, json_each(f.state,'$.registrations') r
-          WHERE r.key=s.player AND json_extract(r.value,'$.reference')=s.reference
+          WHERE r.key=s.player AND json_extract(r.value,'$.reference')=s.reference AND json_extract(r.value,'$.club')=s.buyer
+            AND json_extract(r.value,'$.returnPending') IS NULL
           ORDER BY json_extract(f.state,'$.schedule.deadlineAt'),f.id LIMIT 1) AS firstFixture
         FROM sporting_sales s ORDER BY s.rowid DESC`).all();
     }

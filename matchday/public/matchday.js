@@ -285,14 +285,17 @@ function transferStatus() {
   if (!model.transfers?.length) return '';
   const rows=model.transfers.map(sale=>{
     const roster=model.clubs.find(club=>club.squad.some(p=>p.id===sale.player));
-    const player=roster?.squad.find(p=>p.id===sale.player);
+    const loan=model.fixtureLoans?.find(entry=>entry.player===sale.player);
+    const player=roster?.squad.find(p=>p.id===sale.player) ?? loan;
     const buyer=model.clubs.find(club=>club.id===sale.buyer);
     let detail={pending:'Awaiting finalized settlement',failed:'Settlement failed',expired:'Signed purchase expired'}[sale.status];
     if (sale.status==='finalized') {
       const eligible=sale.firstFixture===id ? 'First eligible fixture is this match.' :
         sale.firstFixture ? 'First eligible fixture: '+sale.firstFixture+'.' : 'No scheduled fixture currently uses this registration.';
-      detail='Finalized for '+buyer.name+' · '+localTime.format(new Date(sale.effectiveAt))+'. '+eligible+
-        ' Registered for this fixture: '+roster.name+'.';
+      const registration=loan?.returnPending ? 'Return pending a locked loan fixture.' :
+        loan?.withdrawn ? 'Loan ended. This player is unavailable as a substitute.' :
+        loan ? 'On loan to '+roster.name+' for this fixture.' : 'Registered for this fixture: '+roster.name+'.';
+      detail='Finalized for '+buyer.name+' · '+localTime.format(new Date(sale.effectiveAt))+'. '+eligible+' '+registration;
     }
     return '<li>'+esc(player.name)+' · '+esc(detail)+'<br>Transfer reference <code>'+esc(sale.reference)+'</code></li>';
   });

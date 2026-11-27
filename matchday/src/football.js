@@ -99,9 +99,9 @@ export function defaultPlan(club, formation, tactic = 'balanced') {
 export function fixtureClubs(registrations) {
   if (!registrations || !Object.keys(registrations).length) return clubs;
   return clubs.map(club => {
-    const retained=club.squad.filter(player=>(registrations[player.id]?.club ?? club.id)===club.id);
+    const retained=club.squad.filter(player=>!registrations[player.id]?.returnPending && (registrations[player.id]?.club ?? club.id)===club.id);
     const arrivals=clubs.filter(other=>other!==club).flatMap(other=>other.squad.filter(player=>
-      registrations[player.id]?.club===club.id));
+      !registrations[player.id]?.returnPending && registrations[player.id]?.club===club.id));
     return {...club,squad:[...retained,...arrivals]};
   });
 }

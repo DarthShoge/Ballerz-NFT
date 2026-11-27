@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { sql } from './store.js';
 import { sportingRegister } from './sporting-register.js';
 
-export function openStore(filename) {
+export function openStore(filename,clock=Date.now) {
   const db = new DatabaseSync(filename);
   db.exec(`
     PRAGMA journal_mode=WAL;
@@ -13,12 +13,18 @@ export function openStore(filename) {
     CREATE INDEX IF NOT EXISTS live_tick ON fixtures (json_extract(state, '$.live.nextAt'), id);
     CREATE TABLE IF NOT EXISTS world_clock (id INTEGER PRIMARY KEY CHECK (id = 1), start_at INTEGER NOT NULL);
   `);
-  const create = db.prepare(sql.create), read = db.prepare(sql.read), update = db.prepare(sql.update);
+  const create = db.prepare(sql.create), read = db.prepare(sql.read);
   const due = db.prepare(sql.due), liveDue = db.prepare(sql.liveDue);
-  const registration = sportingRegister(db);
+  const registration = sportingRegister(db,clock);
+  // A request received before lock can finish after a different process has
+  // recorded a return. Its old XI must never change the recorded commitment.
+  const update = db.prepare(sql.update+` AND (
+    json_extract(state,'$.plans')=? OR NOT EXISTS (
+      SELECT 1 FROM json_each(state,'$.registrations') r JOIN sporting_loans l
+      ON l.agreement=json_extract(r.value,'$.loan') WHERE l.returned=1))`);
   return {
     registration,
-    create: (id, state) => registration.create(()=>create.run(id, JSON.stringify(state)),state),
+    create: (id, state, now=clock()) => registration.create(()=>create.run(id, JSON.stringify(state)),state,now),
     read: id => read.get(id),
     due: time => due.all(time),
     liveDue: time => liveDue.all(time),
@@ -32,7 +38,11 @@ export function openStore(filename) {
       }
       return existing;
     },
-    update: (id, version, state) => update.run(JSON.stringify(state), id, version).changes === 1,
+    update(id,version,state,now=clock()) {
+      const data=JSON.stringify(state);
+      const write=()=>update.run(data,id,version,JSON.stringify(state.plans) ?? null).changes===1;
+      return state.schedule && state.result ? registration.finish(id,state,now,write) : write();
+    },
     close: () => db.close()
   };
 }

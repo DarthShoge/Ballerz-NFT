@@ -21,7 +21,8 @@ function render() {
   el('state').textContent='Agreement '+status+' · Parent '+(parentApproved?'approved':'pending')+
     ' · Borrower '+(borrowerApproved?'approved':'pending');
   if (agreement.confirmedAt!==null)
-    el('state').textContent+=' · Recorded '+new Date(agreement.confirmedAt).toISOString()+' at finalized ownership slot '+agreement.ownershipSlot+'.';
+    el('state').textContent+=' · Recorded '+new Date(agreement.confirmedAt).toISOString()+' at finalized ownership slot '+agreement.ownershipSlot+
+      '. Verified match minutes on loan: '+agreement.matchMinutes+'.';
   const address=signer?.address;
   el('account').textContent=address?'Connected wallet · '+address:'';
   const canApprove=(address===terms.ownerWallet && !parentApproved) || (address===terms.borrowerWallet && !borrowerApproved);

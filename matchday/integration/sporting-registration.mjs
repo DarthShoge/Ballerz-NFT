@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { GAME_WEEK_MS } from '../src/world-clock.js';
 import { managerLoanJourney } from './manager-loan-browser.mjs';
+import { playDueFixtures } from '../src/fixtures.js';
+import { openStore } from '../src/local-store.js';
+import { approveFixture } from '../src/fixture-appearance.js';
+import { treasuryAddresses } from '../src/devnet-settlement.js';
 
 export async function registrationJourney(rpc,world,trial,journal,settle,managers) {
   const fixtureDb=join(world,'sporting.sqlite'), configFile=join(world,'sporting.json');
@@ -87,11 +91,49 @@ export async function registrationJourney(rpc,world,trial,journal,settle,manager
       [fileURLToPath(new URL('../scripts/propose-loan.mjs',import.meta.url)),configFile,proposalFile],{env});
     const agreement=JSON.parse((await issue()).stdout);
     assert.equal(JSON.parse((await issue()).stdout).terms.id,agreement.terms.id);
-    await managerLoanJourney(browser,origin,agreement,managers);
+    const kickoffAt=startAt+3600000;
+    const loanGame=await api('',null,{kickoffAt});
+    const path='/'+loanGame.id;
+    const previous=await api(path,loanGame.key);
+    const parent=await api(path+'/join',previous.invite,{});
+    const parentXI={...previous.defaults[1],xi:previous.defaults[1].xi.map(p=>p==='eastport-7'?'northbank-7':p)};
+    assert.ok((await api(path+'/ready',parent.key,parentXI)).ready[1]);
+    await managerLoanJourney(browser,origin,agreement,managers,async()=>{
+      assert.deepEqual((await api(path,parent.key)).plans[1],parentXI);
+    });
     const recovered=JSON.parse((await issue()).stdout);
     assert.equal(recovered.terms.id,agreement.terms.id);
     assert.equal(recovered.status,'scheduled');
     assert.ok(recovered.parentApproved && recovered.borrowerApproved && recovered.confirmedAt);
+    const borrowerView=await api(path,loanGame.key);
+    assert.equal(borrowerView.ready[1],false);
+    assert.ok(borrowerView.clubs[0].squad.some(p=>p.id==='northbank-7'));
+    assert.ok(!JSON.stringify(borrowerView).includes(agreement.terms.id));
+    assert.deepEqual((await api('/'+id,away.key)).plans,sheet.plans);
+    const borrowerPage=await browser.newPage();
+    await borrowerPage.addInitScript(({id,key})=>sessionStorage.setItem('ballerz.fixture.'+id,key),loanGame);
+    await borrowerPage.goto(origin+'/?fixture='+loanGame.id);
+    await borrowerPage.getByText(/On loan to Northbank Athletic for this fixture/).waitFor();
+    const ready=borrowerPage.waitForResponse(r=>r.url().endsWith('/ready') && r.request().method()==='POST');
+    await borrowerPage.getByRole('button',{name:'Submit team sheet'}).click();
+    assert.equal((await ready).status(),200);
+    assert.ok((await api(path,loanGame.key)).plans[0].xi.includes('northbank-7'));
+    await borrowerPage.close();
+    const accounts=await treasuryAddresses(trial.listing.sponsor,[managers.borrower.publicKey,managers.parent.publicKey]);
+    const store=openStore(fixtureDb);
+    try {
+      approveFixture(store,accounts,loanGame.id);
+      await api(path+'/ready',parent.key,borrowerView.defaults[1]);
+      const row=store.read(loanGame.id);
+      assert.ok(store.update(loanGame.id,row.version,{...JSON.parse(row.state),matchSeed:42}));
+      await playDueFixtures(store,kickoffAt);
+      await playDueFixtures(store,kickoffAt+900000);
+      const result=JSON.parse(store.read(loanGame.id).state).result;
+      const minutes=result.performances[0].find(p=>p.playerId==='northbank-7').minutes;
+      assert.ok(minutes>0);
+      const url=origin+'/api/loans/'+agreement.terms.id;
+      assert.equal((await (await fetch(url)).json()).matchMinutes,minutes);
+    } finally {store.close();}
     return receipt;
   } finally {
     try { await browser?.close(); } finally { server.kill(); await closed; }
