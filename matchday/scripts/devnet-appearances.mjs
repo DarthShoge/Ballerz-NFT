@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { Connection, Keypair } from '@solana/web3.js';
 import { fixtureApi } from '../src/fixtures.js';
 import { openStore } from '../src/local-store.js';
-import { DEVNET_GENESIS, fundTreasury, settleAppearance, treasuryAddresses } from '../src/devnet-settlement.js';
+import { DEVNET_GENESIS, fundTreasury, treasuryAddresses } from '../src/devnet-settlement.js';
+
+import { approveFixture, settleFixture } from '../src/fixture-appearance.js';
 
 const [command, fixtureId] = process.argv.slice(2);
 if (!['setup','play','approve','settle','wallet'].includes(command)
@@ -42,35 +44,14 @@ if (command === 'wallet') {
     else await play();
   } finally { store.close(); }
 
-  async function approve(id) {
-    const row = store.read(id);
-    if (!row) throw new Error('Unknown fixture.');
-    const state = JSON.parse(row.state);
-    const binding = {mint:accounts.mint.toBase58(), owners:accounts.owners.map(key => key.toBase58())};
-    if (state.appearanceApproval) {
-      if (JSON.stringify(state.appearanceApproval) !== JSON.stringify(binding)) throw new Error('Different prior approval.');
-      return;
-    }
-    if (!state.schedule || state.computerAway || state.result || state.live || Date.now() >= state.schedule.deadlineAt)
-      throw new Error('Approve a scheduled two-manager fixture before lineup lock.');
-    state.appearanceApproval = binding;
-    if (!store.update(id, row.version, state)) throw new Error('Fixture changed; retry approval.');
+  function approve(id) {
+    approveFixture(store, accounts, id);
     console.log('Approved test BB for fixture', id);
   }
 
   async function settle(id) {
-    const row = store.read(id);
-    if (!row) throw new Error('Unknown fixture.');
-    const state = JSON.parse(row.state);
-    if (!state.appearanceApproval || !state.result) throw new Error('An approved final result is required.');
-    const result = await settleAppearance(connection, payer, accounts, id, state);
-    // Persist only public, verified evidence. A crash here is recoverable from the marker.
-    if (!state.appearanceReceipt) {
-      state.appearanceReceipt = {signature:result.signature ?? null, payments:result.payments};
-      if (!store.update(id, row.version, state) && !JSON.parse(store.read(id).state).appearanceReceipt)
-        throw new Error('Payment verified; retry to save the public receipt.');
-    }
-    console.log(JSON.stringify({...result, score:state.result.score}, null, 2));
+    const result = await settleFixture(store, connection, payer, accounts, id);
+    console.log(JSON.stringify(result, null, 2));
     return result;
   }
 
