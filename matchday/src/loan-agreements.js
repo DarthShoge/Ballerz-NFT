@@ -4,6 +4,7 @@ import { ed25519 } from '@noble/curves/ed25519';
 import { loanMessage } from '../public/loan-message.js';
 import { reviewLoan } from './loan-review.js';
 import { clubWallets } from './club-wallets.js';
+import { sportingRegister } from './sporting-register.js';
 
 export class LoanError extends Error {
   constructor(message, status = 409) { super(message); this.status = status; }
@@ -20,6 +21,7 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
     );
     CREATE INDEX IF NOT EXISTS loan_periods ON loan_agreements(mint,startAt,endAt);`);
   const find = db.prepare('SELECT * FROM loan_agreements WHERE id=?');
+  const registration = sportingRegister(db,clock);
   const wallets = clubWallets(db);
   const overlapping = db.prepare(`SELECT * FROM loan_agreements
     WHERE mint=? AND startAt < ? AND endAt > ? AND superseded=0`);
@@ -43,7 +45,8 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
     else if (row.confirmedAt !== null)
       status = now < row.startAt ? 'scheduled' : now < row.endAt ? 'active' : 'ended';
     else if (now >= row.startAt) status = 'expired';
-    return {terms: JSON.parse(row.terms), status, parentApproved: !!row.parentSignature,
+    const {matchMinutes}=db.prepare('SELECT COALESCE(SUM(minutes),0) AS matchMinutes FROM sporting_loan_minutes WHERE agreement=?').get(row.id);
+    return {terms: JSON.parse(row.terms), status, matchMinutes, parentApproved: !!row.parentSignature,
       borrowerApproved: !!row.borrowerSignature, confirmedAt: row.confirmedAt, ownershipSlot: row.ownershipSlot};
   }
   function checkAuthority(terms,now) {
@@ -109,8 +112,9 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
       wallets.bind(wallet,column==='parentSignature' ? terms.parent : terms.borrower);
       db.prepare('UPDATE loan_agreements SET '+column+'=?,checkedSlot=? WHERE id=?').run(signature,evidence.checkedSlot,id);
       // One write transaction serializes both signers, replacements and competing processes.
-      db.prepare(`UPDATE loan_agreements SET confirmedAt=?,ownershipSlot=? WHERE id=? AND confirmedAt IS NULL
+      const confirmation=db.prepare(`UPDATE loan_agreements SET confirmedAt=?,ownershipSlot=? WHERE id=? AND confirmedAt IS NULL
         AND parentSignature IS NOT NULL AND borrowerSignature IS NOT NULL`).run(now,evidence.checkedSlot,id);
+      if (confirmation.changes) registration.confirmed(now);
       return view(get(id));
     });
   }

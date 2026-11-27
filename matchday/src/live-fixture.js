@@ -28,6 +28,8 @@ export function startLiveFixture(state, time) {
   const live = {startedAt: time, nextAt: time, seed: state.matchSeed, sequence: 0, halfTimeUntil: null,
     timing: {matchSpeed: MATCH_SECONDS_PER_SECOND, halfTimeMs: HALF_TIME_MS}};
   const game = startMatch(matchTeams(state.plans,fixtureClubs(state.registrations)), matchRandom(live));
+  if (state.withdrawnLoanReserves)
+    for (const team of game.teams) team.bench=team.bench.filter(player=>!state.withdrawnLoanReserves.includes(player.id));
   if (state.computerAway) game.teams[1].manualSubstitutions = true;
   live.checkpoint = checkpointMatch(game);
   live.frames = [pitchFrame(game, 0)];

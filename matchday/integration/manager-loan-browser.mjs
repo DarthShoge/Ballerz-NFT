@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { ed25519 } from '@noble/curves/ed25519';
 import { loanMessage } from '../public/loan-message.js';
 
-export async function managerLoanJourney(browser,origin,agreement,managers) {
+export async function managerLoanJourney(browser,origin,agreement,managers,checkPendingFixture) {
   const url=origin+agreement.reviewPath;
   const api=origin+'/api/loans/'+agreement.terms.id;
   const withoutSignature=await fetch(api+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -52,6 +52,7 @@ export async function managerLoanJourney(browser,origin,agreement,managers) {
     const first=await approve(parent);
     assert.ok(first.view.parentApproved);
     assert.equal(first.view.confirmedAt,null);
+    await checkPendingFixture();
     const second=await approve(borrower);
     assert.ok(second.view.confirmedAt);
     assert.equal(second.view.status,'scheduled');

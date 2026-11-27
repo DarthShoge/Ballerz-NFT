@@ -47,6 +47,10 @@ function view(id, state, side, time, after, playtest, includeTactics) {
     ready: state.plans.map(Boolean), result: recordedMatchReport(state.result), teamSheetLocked,
     ...(state.appearanceReceipt ? {appearanceReceipt:state.appearanceReceipt} : {}),
     schedule: schedule ?? null, live: liveFixtureView(state.live, after),
+    ...(state.registrations && {fixtureLoans:Object.entries(state.registrations)
+      .filter(([,entry])=>entry.loan || entry.returnPending)
+      .map(([player,entry])=>({player,name:clubs.flatMap(club=>club.squad).find(p=>p.id===player)?.name,
+        club:entry.club,returnPending:!!entry.returnPending,withdrawn:state.withdrawnLoanReserves?.includes(player) ?? false}))}),
     ...(playtest && side === 0 ? {playtestControls: true} : {}),
     plans: state.plans.map((plan, i) => i === side || state.result ? plan : null),
     invite: side === 0 ? state.invite : null
@@ -54,6 +58,7 @@ function view(id, state, side, time, after, playtest, includeTactics) {
 }
 
 export async function playDueFixtures(store, time = Date.now()) {
+  store.registration?.advance(time);
   for (const row of await store.due(time)) {
     const state = readFixture(row.state);
     const [home, away] = state.plans;
@@ -66,12 +71,12 @@ export async function playDueFixtures(store, time = Date.now()) {
       state.result = {kind: 'double-forfeit', score: null};
     }
     // Retry a competing write on the next tick before advancing to a later kickoff.
-    if (!(await store.update(row.id, row.version, state))) break;
+    if (!(await store.update(row.id, row.version, state,time))) break;
   }
   for (const row of await store.liveDue(time)) {
     const state = readFixture(row.state);
     advanceLiveFixture(state, time);
-    await store.update(row.id, row.version, state);
+    await store.update(row.id, row.version, state,time);
   }
 }
 
@@ -119,7 +124,7 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
       state.plans[1] = computerPlan(clubs[1]);
     }
     if (schedule) state.schedule = schedule;
-    await store.create(id, state);
+    await store.create(id, state,receivedAt);
     return json({id, key}, 201);
   }
 
@@ -132,6 +137,7 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
   if (!auth) return error('A manager key or invitation is required.', 401);
   const token = auth[1];
   const hash = await digest(token);
+  store.registration?.advance(receivedAt);
   const response = (state, side) => {
     const data=view(id, state, side, receivedAt, after, playtest, !url.searchParams.has('after'));
     if (state.schedule && !state.result && store.registration) data.transfers=store.registration.status();
@@ -176,6 +182,8 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
         if (!state.schedule || receivedAt >= state.schedule.kickoffAt || state.result || state.live || !state.plans.every(Boolean)) {
           return error('An upcoming scheduled fixture needs both submitted team sheets to kick off now.', 409);
         }
+        if (store.registration && !store.registration.canKickoffEarly(state,receivedAt))
+          return error('Loan eligibility changes before the scheduled deadline. Keep the scheduled kickoff.',409);
         state.schedule.playtestKickoffAt = receivedAt;
         state.matchSeed ??= newSeed();
         startLiveFixture(state, receivedAt);
@@ -184,14 +192,14 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
         if (receivedAt >= state.live.nextAt) advanceLiveFixture(state, receivedAt);
         if (state.live) advanceLiveFixture(state, receivedAt, {fastForward: true});
       }
-      if (await store.update(id, row.version, state)) return response(state, side);
+      if (await store.update(id, row.version, state,receivedAt)) return response(state, side);
       continue;
     }
     if (action === 'touchline') {
       if (!state.live) return error('Touchline changes are available during the match.', 409);
       if (receivedAt >= state.live.nextAt) advanceLiveFixture(state, receivedAt);
       if (!state.live) {
-        if (await store.update(id, row.version, state)) return error('The match has finished.', 409);
+        if (await store.update(id, row.version, state,receivedAt)) return error('The match has finished.', 409);
         continue;
       }
       const problem = orderTouchline(state.live, side, submitted);
