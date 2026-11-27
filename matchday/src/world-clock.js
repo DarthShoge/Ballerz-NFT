@@ -1,6 +1,7 @@
 export const GAME_WEEK_MS = 24 * 60 * 60 * 1000;
 const DAYS_PER_WEEK = 7;
 const WEEKS_PER_YEAR = 52;
+export const GAME_YEAR_MS = WEEKS_PER_YEAR * GAME_WEEK_MS;
 export const TEAM_SHEET_LOCK_MS = 30 * 60 * 1000;
 
 export function worldDate(startAt, time) {

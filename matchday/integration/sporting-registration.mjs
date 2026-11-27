@@ -90,6 +90,11 @@ export async function registrationJourney(rpc,world,trial,journal,settle,manager
     const issue=()=>promisify(execFile)(process.execPath,
       [fileURLToPath(new URL('../scripts/propose-loan.mjs',import.meta.url)),configFile,proposalFile],{env});
     const agreement=JSON.parse((await issue()).stdout);
+    const rateFile=join(world,'winger-rate.json');
+    writeFileSync(rateFile,JSON.stringify({mint:trial.listing.playerMint,year:1,annualBB:52000}));
+    const publishRate=()=>promisify(execFile)(process.execPath,
+      [fileURLToPath(new URL('../scripts/publish-wage-rate.mjs',import.meta.url)),configFile,rateFile],{env});
+    assert.deepEqual((await publishRate()).stdout,(await publishRate()).stdout);
     assert.equal(JSON.parse((await issue()).stdout).terms.id,agreement.terms.id);
     const kickoffAt=startAt+3600000;
     const loanGame=await api('',null,{kickoffAt});
