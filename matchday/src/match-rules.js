@@ -3,6 +3,12 @@ import { isActive } from './match-decisions.js';
 const SUBSTITUTION_LIMIT = 5;
 const SUBSTITUTION_WINDOWS = 3;
 const MINIMUM_PLAYERS = 7;
+
+export function keepsAppearanceOnAbandonment(team) {
+  const active = team.players.filter(isActive).length;
+  const dismissals = team.players.filter(player => player.dismissed).length;
+  return active >= MINIMUM_PLAYERS || active + dismissals < MINIMUM_PLAYERS;
+}
 const minimumKeeperAttributes = Object.fromEntries([
   'passing', 'firstTouch', 'dribbling', 'finishing', 'tackling', 'vision', 'decisions', 'composure',
   'offBall', 'positioning', 'workRate', 'pace', 'stamina', 'handling', 'reflexes', 'oneOnOnes', 'crossing', 'aerial'

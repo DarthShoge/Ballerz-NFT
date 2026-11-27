@@ -1139,6 +1139,19 @@ function updateLivePanel() {
     <small>${esc(model.clubs[sideNames.indexOf(event.side)]?.shortName)} · ${esc(eventLabels[event.type] ?? "Match event")}</small></div>
   </li>`).join("") || '<li class="hint">Waiting for the first match event.</li>';
 }
+function appearancePanel() {
+  const receipt = model.appearanceReceipt;
+  if (!receipt) return "";
+  const payments = receipt.payments.map(payment => {
+    const club = model.clubs.find(team => team.id === payment.club);
+    return esc(club?.name ?? payment.club) + " · " + esc(payment.bb.toLocaleString("en-US")) + " BB";
+  });
+  const proof = receipt.signature
+    ? '<a href="https://explorer.solana.com/tx/' + encodeURIComponent(receipt.signature) + '?cluster=devnet">View finalized payment</a>'
+    : '';
+  return '<section class="card"><h2>Devnet appearance payments</h2><p>' +
+    (payments.join("<br>") || "Neither club qualified.") + '</p>' + proof + '</section>';
+}
 function reportPanel() {
   const result = model.result;
   if (result.kind === "double-forfeit") {
@@ -1187,7 +1200,7 @@ function render() {
   livePitch = null;
   const watching = currentTab === "live" && model.live;
   app.innerHTML=heading()+inviteBox+scheduledFixtureForm()+(watching?"":scoreboard())+tabBar()+
-    (watching?livePanel():currentTab==="opposition"?opponentPanel():currentTab==="report"&&model.result?reportPanel():teamPanel());
+    (watching?livePanel():currentTab==="opposition"?opponentPanel():currentTab==="report"&&model.result?appearancePanel()+reportPanel():teamPanel());
   if (watching) {
     livePitch = animatePitch(document.getElementById("live-pitch"), pitchCommentator());
     liveTacticsDirty = false;
