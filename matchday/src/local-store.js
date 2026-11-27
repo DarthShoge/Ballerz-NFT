@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { sql } from './store.js';
+import { sportingRegister } from './sporting-register.js';
 
 export function openStore(filename) {
   const db = new DatabaseSync(filename);
@@ -14,8 +15,10 @@ export function openStore(filename) {
   `);
   const create = db.prepare(sql.create), read = db.prepare(sql.read), update = db.prepare(sql.update);
   const due = db.prepare(sql.due), liveDue = db.prepare(sql.liveDue);
+  const registration = sportingRegister(db);
   return {
-    create: (id, state) => create.run(id, JSON.stringify(state)),
+    registration,
+    create: (id, state) => registration.create(()=>create.run(id, JSON.stringify(state)),state),
     read: id => read.get(id),
     due: time => due.all(time),
     liveDue: time => liveDue.all(time),

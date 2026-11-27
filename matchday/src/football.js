@@ -87,14 +87,26 @@ export function orderedXI(club, plan) {
   return Object.keys(formations[plan.formation]).flatMap(pos => players.filter(p => p.position === pos));
 }
 
-export function defaultPlan(club, formation = '4-4-2', tactic = 'balanced') {
+export function defaultPlan(club, formation, tactic = 'balanced') {
+  formation ??= Object.keys(formations).find(name => Object.entries(formations[name]).every(([position,count]) =>
+    club.squad.filter(player => player.position === position).length >= count)) ?? '4-4-2';
   const shape = formations[formation];
   const xi = Object.entries(shape).flatMap(([position, count]) =>
     club.squad.filter(player => player.position === position).slice(0, count).map(player => player.id));
-  return { formation, tactic, xi: club.id === clubs[1].id ? mirrorLineup(formation, xi) : xi };
+  return { formation, tactic, xi: club.id === clubs[1].id && xi.length===11 ? mirrorLineup(formation, xi) : xi };
 }
 
-export function validatePlan(club, plan) {
+export function fixtureClubs(registrations) {
+  if (!registrations || !Object.keys(registrations).length) return clubs;
+  return clubs.map(club => {
+    const retained=club.squad.filter(player=>(registrations[player.id]?.club ?? club.id)===club.id);
+    const arrivals=clubs.filter(other=>other!==club).flatMap(other=>other.squad.filter(player=>
+      registrations[player.id]?.club===club.id));
+    return {...club,squad:[...retained,...arrivals]};
+  });
+}
+
+export function validatePlan(club, plan, opponents = clubs.find(other => other.id !== club.id)) {
   if (typeof plan?.formation !== 'string' || !Object.hasOwn(formations, plan.formation)) return 'Choose a listed formation.';
   if (typeof plan.tactic !== 'string' || !Object.hasOwn(tactics, plan.tactic)) return 'Choose a listed tactic.';
   const problem = instructionProblem(plan);
@@ -108,15 +120,15 @@ export function validatePlan(club, plan) {
     if (players.filter(player => player.position === position).length !== count)
       return 'This formation requires ' + count + ' ' + position + '.';
   }
-  return dutyProblem(plan.duties, players) ?? individualInstructionProblem(plan.playerInstructions, players) ?? markingProblem(plan.markingTargets, players, clubs.find(p => p.id !== club.id).squad) ?? shapeProblem(plan.defensiveFormation)
+  return dutyProblem(plan.duties, players) ?? individualInstructionProblem(plan.playerInstructions, players) ?? markingProblem(plan.markingTargets, players, opponents.squad) ?? shapeProblem(plan.defensiveFormation)
     ?? roleProblem(plan.playerRoles, plan.formation, plan.defensiveFormation,
       orderedXI(club, plan).map(({id}, slotIndex) => ({id, slotIndex})));
 }
 
-export function matchTeams(plans) {
+export function matchTeams(plans, rosters = clubs) {
   return plans.map((plan, index) => {
-    const club = clubs[index];
-    const error = validatePlan(club, plan);
+    const club = rosters[index];
+    const error = validatePlan(club, plan, rosters[1-index]);
     if (error) throw new Error(error);
     const preset = tactics[plan.tactic];
     const team = { side: index, formation: plan.formation, defensiveFormation: plan.defensiveFormation ?? 'same',

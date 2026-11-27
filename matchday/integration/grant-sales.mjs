@@ -8,6 +8,7 @@ import { Keypair } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { openGrantLedger } from '../src/grant-ledger.js';
 import { fixedMint, parseTrial, settleTrial, signTrial, submitSigned } from '../scripts/transfer-trial.mjs';
+import { registrationJourney } from './sporting-registration.mjs';
 
 export async function grantSaleJourney(rpc,payer,world) {
   const [home,affiliate,away,treasury]=Array.from({length:4},()=>Keypair.generate());
@@ -85,7 +86,8 @@ export async function grantSaleJourney(rpc,payer,world) {
     const independent=await sign(home,away,other,150000);
     const signedFile=join(world,'approved-grant-sale.json');
     writeFileSync(signedFile,JSON.stringify(independent),{mode:0o600});
-    const loss=JSON.parse((await command('settle',signedFile)).stdout);
+    const loss=await registrationJourney(rpc,world,independent,signedFile,async()=>
+      JSON.parse((await command('settle',signedFile)).stdout));
     assert.deepEqual([loss.grant.recovered,loss.grant.writtenOff,loss.grant.carried],[150000,50000,0]);
     assert.equal(ledger.quote({...independent.listing,seller:away.publicKey},home.publicKey).grant.claim,0);
     assert.equal((await rpc.getTokenAccountBalance(getAssociatedTokenAddressSync(bbMint,treasury.publicKey),'finalized')).value.amount,'350000');

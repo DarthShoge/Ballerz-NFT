@@ -16,7 +16,8 @@ function ability(player) {
 
 export function computerPlan(club) {
   const squad = [...club.squad].sort((a, b) => ability(b) - ability(a));
-  return defaultPlan({...club, squad}, '4-4-2', 'counter');
+  const plan=defaultPlan({...club, squad}, undefined, 'counter');
+  return plan.xi.length===11 ? plan : null;
 }
 
 export function manageComputerTeam(game, side) {

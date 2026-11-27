@@ -1,4 +1,4 @@
-import { instructions, matchTeams } from './football.js';
+import { fixtureClubs, instructions, matchTeams } from './football.js';
 import { advanceMatch, atHalfTime, checkpointMatch, liveMatchReport, matchResult, pitchFrame,
   restoreMatch, startMatch } from './match-engine.js';
 import { dutyProblem, instructionProblem, instructionValues, playerDuties } from './match-tactics.js';
@@ -27,7 +27,7 @@ function matchRandom(live) {
 export function startLiveFixture(state, time) {
   const live = {startedAt: time, nextAt: time, seed: state.matchSeed, sequence: 0, halfTimeUntil: null,
     timing: {matchSpeed: MATCH_SECONDS_PER_SECOND, halfTimeMs: HALF_TIME_MS}};
-  const game = startMatch(matchTeams(state.plans), matchRandom(live));
+  const game = startMatch(matchTeams(state.plans,fixtureClubs(state.registrations)), matchRandom(live));
   if (state.computerAway) game.teams[1].manualSubstitutions = true;
   live.checkpoint = checkpointMatch(game);
   live.frames = [pitchFrame(game, 0)];

@@ -557,3 +557,6 @@
 }
 
 .schedule-options{margin-bottom:16px}.schedule-options>summary{cursor:pointer;font-weight:700;padding:8px 0;width:fit-content}.page-heading>div:last-child{display:flex;flex-wrap:wrap;gap:6px}
+
+.registration code { overflow-wrap: anywhere; }
+.registration li + li { margin-top: .6rem; }
