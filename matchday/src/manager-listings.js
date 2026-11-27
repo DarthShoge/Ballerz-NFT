@@ -27,7 +27,8 @@ function walletKey(value) {
   throw new ListingError('Connect a valid seller wallet.',400);
 }
 
-export async function openListingDesk(rpc, sponsor, filename, genesis = DEVNET_GENESIS) {
+export async function openListingDesk(rpc, sponsor, filename, genesis = DEVNET_GENESIS, sponsoredRequests = 12) {
+  if (!Number.isSafeInteger(sponsoredRequests) || sponsoredRequests<0) throw new Error('Invalid listing sponsor limit.');
   const payer = sponsor.publicKey;
   const mint = seed => PublicKey.createWithSeed(payer,seed,TOKEN_PROGRAM_ID);
   const [playerMint,bbMint] = await Promise.all([mint('ballerz-transfer-winger-v1'),mint('ballerz-transfer-test-bb-v1')]);
@@ -70,21 +71,22 @@ export async function openListingDesk(rpc, sponsor, filename, genesis = DEVNET_G
     await reconcile(latest());
     const row = latest();
     const height = await rpc.getBlockHeight('confirmed');
-    let active = null;
+    let delegated = null;
     // An unsigned draft never creates an order. Only a known delegate on a
     // finalized title account can expose a listing to other managers.
     const owner = row && walletKey(row.seller);
     const held = owner && await title(owner);
     if (held?.delegate && held.delegatedAmount === 1n) {
       const offer = db.prepare("SELECT * FROM manager_listings WHERE mint=? AND version=? AND action='list' AND state='finalized'").get(asset,held.delegate.toBase58());
-      if (offer && height <= offer.height) {
+      if (offer) {
         const publication = Transaction.from(Buffer.from(offer.wire,'base64'));
-        active = {seller:offer.seller,price:offer.price,wages:policy.wages,expiry:offer.height,
+        delegated = {seller:offer.seller,price:offer.price,wages:policy.wages,expiry:offer.height,
           blockhash:publication.recentBlockhash,disclosures,version:offer.version,signature:offer.sig};
       }
     }
     const owns = sellerAddress ? !!await title(walletKey(sellerAddress)) : false;
-    return {asset,bbMint:bbMint.toBase58(),sponsor:payer.toBase58(),policy,height,active,owns,
+    const active = delegated && height<=delegated.expiry ? delegated : null;
+    return {asset,bbMint:bbMint.toBase58(),sponsor:payer.toBase58(),policy,height,active,delegated,owns,
       revision:row?.id ?? 0, last:row ? {action:row.action,state:row.state,signature:row.sig,expiry:row.height} : null};
   }
 
@@ -94,13 +96,16 @@ export async function openListingDesk(rpc, sponsor, filename, genesis = DEVNET_G
     const state = await view(address);
     if (!state.owns || seller.equals(payer)) throw new ListingError('Only the current player owner can approve.',403);
     if (state.last?.state==='pending' || revision !== state.revision) throw new ListingError('The listing changed. Refresh and review it again.');
-    if (action === 'cancel' && !state.active) throw new ListingError('There is no active listing to cancel.');
+    if (action === 'cancel' && !state.delegated) throw new ListingError('There is no listing delegate to revoke.');
+    const limit = sponsoredRequests - (action==='list' ? 1 : 0);
+    if (db.prepare('SELECT count(*) AS n FROM manager_listings WHERE mint=?').get(asset).n >= limit)
+      throw new ListingError('The listing sponsor budget is exhausted.');
     const info = await getMint(rpc,playerMint,'finalized');
     if (info.supply !== 1n || info.decimals || info.mintAuthority || info.freezeAuthority) throw new ListingError('The player title is ineligible.');
-    price = action==='cancel' ? state.active.price : price;
+    price = action==='cancel' ? state.delegated.price : price;
     try { transferTerms({price,wages:policy.wages}); } catch { throw new ListingError('Enter a positive whole-BB price.',400); }
     const key = action==='list' ? Keypair.generate() : null;
-    const version = key?.publicKey ?? new PublicKey(state.active.version);
+    const version = key?.publicKey ?? new PublicKey(state.delegated.version);
     const block = await rpc.getLatestBlockhash('confirmed');
     const listing = {sponsor:payer,seller,playerMint,bbMint,version,price,wages:policy.wages,disclosures,...block};
     const tx = key ? publishListing(listing,await rpc.getMinimumBalanceForRentExemption(MULTISIG_SIZE)) : cancelListingVersion(listing);
@@ -128,12 +133,14 @@ export async function openListingDesk(rpc, sponsor, filename, genesis = DEVNET_G
       const state = await view(quote.seller);
       if (!state.owns || state.revision!==quote.revision || state.last?.state==='pending' || state.height>quote.expiry)
         throw new ListingError('Ownership, expiry or listing version changed. Review again.');
-      if (quote.action==='cancel' && state.active?.version!==quote.version) throw new ListingError('The listing has changed.');
+      if (quote.action==='cancel' && state.delegated?.version!==quote.version) throw new ListingError('The listing has changed.');
       // Claim this parent version before any broadcast, including across server processes.
       const write = db.prepare(`INSERT OR IGNORE INTO manager_listings(mint,parent,seller,version,action,price,height,sig,wire,state)
-        VALUES(?,?,?,?,?,?,?,?,?,'pending')`).run(asset,quote.revision,quote.seller,quote.version,quote.action,quote.price,quote.expiry,signature,tx.serialize().toString('base64'));
+        SELECT ?,?,?,?,?,?,?,?,?,'pending' WHERE (SELECT count(*) FROM manager_listings WHERE mint=?) < ?`).run(
+          asset,quote.revision,quote.seller,quote.version,quote.action,quote.price,quote.expiry,signature,
+          tx.serialize().toString('base64'),asset,sponsoredRequests-(quote.action==='list' ? 1 : 0));
       if (!write.changes && !db.prepare('SELECT id FROM manager_listings WHERE sig=?').get(signature))
-        throw new ListingError('Another approval has already changed this listing.');
+        throw new ListingError('The listing revision or available sponsorship changed. Refresh and review again.');
     }
     await reconcile(db.prepare('SELECT * FROM manager_listings WHERE sig=?').get(signature));
     return {signature};

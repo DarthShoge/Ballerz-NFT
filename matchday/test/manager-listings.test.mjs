@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import * as web3 from '@solana/web3.js';
+import { reviewedListing } from '../public/reviewed-listing.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { openListingDesk, listingApi } from '../src/manager-listings.js';
 import { spawn } from 'node:child_process';
@@ -11,7 +13,7 @@ test('seller approval is bound to terms, title, network, revision and the last v
   const sponsor=Keypair.generate(), seller=Keypair.generate();
   const mint=await PublicKey.createWithSeed(sponsor.publicKey,'ballerz-transfer-winger-v1',TOKEN_PROGRAM_ID);
   const ata=getAssociatedTokenAddressSync(mint,seller.publicKey);
-  let height=90, owned=true, status=null;
+  let height=90, owned=true, status=null, delegate;
   const wires=new Set();
   const blockhash=Keypair.generate().publicKey.toBase58();
   function data(layout,fields) {
@@ -20,15 +22,16 @@ test('seller approval is bound to terms, title, network, revision and the last v
   }
   const rpc={
     getGenesisHash:async()=>'local',getBlockHeight:async()=>height,
-    getLatestBlockhash:async()=>({blockhash,lastValidBlockHeight:100}),
+    getLatestBlockhash:async()=>({blockhash,lastValidBlockHeight:height+10}),
     getMinimumBalanceForRentExemption:async()=>1234,
     getSignatureStatuses:async()=>({value:[status]}),
     sendRawTransaction:async wire=>wires.add(wire.toString('base64')),
     getAccountInfo:async key=>key.equals(mint)?data(MintLayout,{supply:1n,isInitialized:true}):
-      owned && key.equals(ata)?data(AccountLayout,{mint,owner:seller.publicKey,amount:1n,state:1}):null
+      owned && key.equals(ata)?data(AccountLayout,{mint,owner:seller.publicKey,amount:1n,state:1,
+        ...(delegate && {delegate,delegateOption:1,delegatedAmount:1n})}):null
   };
   await assert.rejects(openListingDesk(rpc,sponsor,':memory:','wrong'),/network/);
-  const desk=await openListingDesk(rpc,sponsor,':memory:','local');t.after(()=>desk.close());
+  const desk=await openListingDesk(rpc,sponsor,':memory:','local',3);t.after(()=>desk.close());
   const terms={action:'list',seller:seller.publicKey.toBase58(),price:100000,revision:0};
   async function signed() {
     const packet=await desk.prepare(terms);
@@ -37,6 +40,10 @@ test('seller approval is bound to terms, title, network, revision and the last v
     return {...packet,signed:tx.serialize({requireAllSignatures:false}).toString('base64')};
   }
   const a=await signed(),b=await signed();
+  const market=await desk.view(terms.seller);
+  await reviewedListing(web3,a.quote,market,terms);
+  await assert.rejects(reviewedListing(web3,a.quote,market,{...terms,price:1}),/reviewed/);
+  await assert.rejects(reviewedListing(web3,{...a.quote,wire:b.quote.wire},market,terms),/reviewed/);
   assert.equal(a.quote.net,100000);assert.equal(a.quote.total,130000);
   owned=false;await assert.rejects(desk.approve(a),/Ownership/);owned=true;
   height=101;await assert.rejects(desk.approve(a),/expiry/);
@@ -51,6 +58,20 @@ test('seller approval is bound to terms, title, network, revision and the last v
   assert.equal((await desk.view()).last.state,'expired');
   assert.equal((await desk.view()).active,null);
   assert.equal(wires.size,1);
+  terms.revision=(await desk.view()).revision;
+  const publish=await signed();await desk.approve(publish);
+  delegate=new PublicKey(publish.quote.version);
+  status={confirmationStatus:'finalized',err:null};
+  height=publish.quote.expiry+1;
+  const expired=await desk.view(terms.seller);
+  assert.equal(expired.active,null);assert.equal(expired.delegated.version,publish.quote.version);
+  await assert.rejects(desk.prepare({...terms,revision:expired.revision}),/budget/);
+  const cancelIntent={...terms,action:'cancel',revision:expired.revision};
+  const revoke=await desk.prepare(cancelIntent);
+  const cancelTx=await reviewedListing(web3,revoke.quote,expired,cancelIntent);
+  cancelTx.partialSign(seller);
+  await desk.approve({...revoke,signed:cancelTx.serialize({requireAllSignatures:false}).toString('base64')});
+  assert.equal((await desk.view()).last.action,'cancel');
 });
 
 test('an unconfigured market reports its availability to the manager',async()=>{

@@ -1,3 +1,4 @@
+import { reviewedListing } from './reviewed-listing.js';
 const el = id => document.getElementById(id);
 let wallet, seller, state, draft, busy=false, generation=0;
 async function api(path='',body) {
@@ -10,7 +11,7 @@ function invalidate() { generation++; draft=null; el('approval').hidden=true; }
 function availability() {
   const pending=state?.last?.state==='pending';
   el('editor').hidden=!state?.owns;
-  el('cancel').hidden=!state?.active;
+  el('cancel').hidden=!state?.delegated;
   for (const id of ['connect','review','cancel','sign','refresh','price']) el(id).disabled=busy;
   el('review').disabled=el('cancel').disabled=busy || pending;
 }
@@ -22,7 +23,8 @@ async function refresh() {
   if (draft && (draft.quote.revision!==state.revision || draft.quote.expiry<state.height || !state.owns)) invalidate();
   const offer=state.active;
   const bb=n=>n.toLocaleString('en-GB')+' test BB';
-  el('market').textContent=offer?'Listed for '+bb(offer.price)+' through block '+offer.expiry: 'No active listing.';
+  el('market').textContent=offer?'Listed for '+bb(offer.price)+' through block '+offer.expiry:
+    state.delegated?'Offer expired. The seller can still revoke the token delegate.':'No active listing.';
   const last=state.last;
   el('reference').textContent=last?'Latest '+(last.action==='list'?'listing':'cancellation')+' · '+last.state+' · '+last.signature:'';
   el('account').textContent=current ? (state.owns?'Seller wallet · ':'Connected wallet does not own this player · ')+current:'';
@@ -49,9 +51,11 @@ function review(action) {
   return run(async()=>{
     invalidate(); const seq=generation;
     if (action==='list' && !el('price').reportValidity()) return;
-    const packet=await api('/review',{seller,action,price:el('price').valueAsNumber,revision:state.revision});
+    const intent={seller,action,price:action==='cancel'?state.delegated.price:el('price').valueAsNumber,revision:state.revision};
+    const packet=await api('/review',intent);
+    await reviewedListing(solanaWeb3,packet.quote,state,intent);
     if (generation!==seq || wallet.publicKey?.toBase58()!==seller) throw Error('Reconnect the seller wallet.');
-    draft=packet;
+    draft={...packet,intent};
     const q=draft.quote, p=q.policy, bb=n=>n.toLocaleString('en-GB')+' test BB';
     const rows=[['Player',p.name],['Player mint',q.asset],['Seller',seller],['Test BB mint',state.bbMint],['Gross selling price',bb(q.price)],
       ['Commission',bb(p.commission)],['Grant recovery',bb(p.grantRecovery)],['Arrears',bb(p.arrears)],['Net to seller',bb(q.net)],
@@ -68,11 +72,12 @@ el('review').onclick=()=>review('list');el('cancel').onclick=()=>review('cancel'
 el('sign').onclick=()=>run(async()=>{
   const packet=draft;
   if (!packet || wallet.publicKey?.toBase58()!==seller) throw Error('Reconnect and review the terms.');
-  const tx=solanaWeb3.Transaction.from(Uint8Array.from(atob(packet.quote.wire),c=>c.charCodeAt(0)));
+  const tx=await reviewedListing(solanaWeb3,packet.quote,state,packet.intent);
+  if (packet!==draft || wallet.publicKey?.toBase58()!==seller) throw Error('Reconnect and review the terms.');
   const approved=await wallet.signTransaction(tx);
   if (packet!==draft || wallet.publicKey?.toBase58()!==seller) throw Error('Wallet or terms changed. Review again.');
   const signed=btoa(String.fromCharCode(...approved.serialize({requireAllSignatures:false})));
-  const {signature}=await api('/approve',{...packet,signed});
+  const {signature}=await api('/approve',{quote:packet.quote,seal:packet.seal,signed});
   invalidate(); el('message').textContent='Approval recorded. Transfer reference · '+signature;await refresh();
 });
 el('refresh').onclick=()=>run(refresh);

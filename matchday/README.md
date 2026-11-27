@@ -108,6 +108,8 @@ To enable the pilot, set `BALLERZ_LISTING_SPONSOR` to the path to the capped Dev
 
 Install the test browser with `pnpm exec playwright install --with-deps chromium` before running the validator suite. It drives the seller page in Chromium against a fresh local validator using a disposable wallet.
 
+The browser checks the token instructions, player mint, delegate, fee payer and signed terms before opening the wallet. Offer expiry stops purchases. If a delegate remains on the title account, the seller can still revoke it. The desk defaults to 12 sponsored requests per trial mint across restarts in the same database, with one slot reserved for cancellation. Failed and expired submissions count because they can incur fees. Set `BALLERZ_LISTING_REQUEST_LIMIT` to change the pilot allowance; keep the same ledger when restarting.
+
 ```sh
 node --test
 node scripts/benchmark.mjs 120 20261201

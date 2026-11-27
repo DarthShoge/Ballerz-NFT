@@ -23,7 +23,8 @@ function getListingDesk() {
   listingDesk ??= Promise.resolve().then(() => openListingDesk(
     new Connection(process.env.BALLERZ_DEVNET_RPC || 'https://api.devnet.solana.com','finalized'),
     Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(sponsorFile,'utf8')))),
-    process.env.BALLERZ_LISTING_DB || fileURLToPath(new URL('listings.sqlite',dataDir))
+    process.env.BALLERZ_LISTING_DB || fileURLToPath(new URL('listings.sqlite',dataDir)), undefined,
+    Number(process.env.BALLERZ_LISTING_REQUEST_LIMIT ?? 12)
   )).catch(() => { listingDesk=undefined; return null; });
   return listingDesk;
 }

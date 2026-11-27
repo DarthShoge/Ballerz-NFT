@@ -13,7 +13,7 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
   const genesis=await rpc.getGenesisHash();
   const open=()=>openListingDesk(rpc,sponsor,join(world,'manager.sqlite'),genesis);
   let desk=await open();
-  const files=new Map(['listings.html','listings.js','listings.css','matchday.css'].map(name=>[
+  const files=new Map(['listings.html','listings.js','reviewed-listing.js','listings.css','matchday.css'].map(name=>[
     '/'+name,readFileSync(new URL('../public/'+name,import.meta.url))]));
   files.set('/vendor/solana.js',readFileSync(join(dirname(createRequire(import.meta.url).resolve('@solana/web3.js')),'index.iife.min.js')));
   const server=http.createServer(async(req,res)=>{
