@@ -34,6 +34,12 @@ export async function registrationJourney(rpc,world,trial,journal,settle) {
     const away=await api('/'+id+'/join',fixture.invite,{});
     const [pending]=await index();
     assert.equal(pending.status,'pending');
+    const currency=config.bbMint;
+    config.bbMint=trial.listing.playerMint;
+    write();
+    await assert.rejects(index(),/different registration network, currency or sponsor/);
+    config.bbMint=currency;
+    write();
     assert.equal((await api('/'+id,key)).transfers[0].reference,pending.reference);
     browser=await chromium.launch();
     const page=await browser.newPage();

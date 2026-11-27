@@ -14,6 +14,7 @@ export function tacticalPreview(input, rosters = clubs) {
   const problem = validatePlan(rosters[side], plan, rosters[1-side]);
   if (problem) return {error: problem};
   const plans = rosters.map(club => defaultPlan(club));
+  if (plans[1-side].xi.length < 11) return {error:'The opponent cannot field a full XI for this preview.'};
   plans[side] = plan;
   const {teams} = startMatch(matchTeams(plans,rosters), () => 0.5);
   const relative = ({x,y}) => side ? {x: 105 - x, y: 68 - y} : {x,y};

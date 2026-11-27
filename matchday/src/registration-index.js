@@ -64,7 +64,7 @@ export async function indexTransfers(rpc,register,config,journals,clock=Date.now
   for (const journal of journals) {
     try { observe(register,config,journal); } catch (error) { errors.push(error.message); }
   }
-  for (const row of register.unresolved(config.genesis)) {
+  for (const row of register.unresolved(config)) {
     try { await reconcile(rpc,register,row,clock); } catch (error) { errors.push(row.reference+': '+error.message); }
   }
   if (errors.length) throw new Error(errors.join('\n'));

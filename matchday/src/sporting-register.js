@@ -15,6 +15,13 @@ export function sportingRegister(db) {
     try { const result=fn(); db.exec('COMMIT'); return result; }
     catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  function checkPilot(genesis,bb,sponsor) {
+    if (db.prepare('SELECT 1 FROM sporting_players WHERE genesis<>? OR bb<>? OR sponsor<>? LIMIT 1').get(genesis,bb,sponsor))
+      throw new Error('Fixture database belongs to a different registration network, currency or sponsor.');
+  }
+  const conflictingWallet=db.prepare(`SELECT 1 FROM sporting_sales
+    WHERE (json_extract(terms,'$.listing.seller')=? AND seller<>?)
+       OR (json_extract(terms,'$.buyer')=? AND buyer<>?) LIMIT 1`);
   function project(state) {
     if (!state.schedule) return false;
     const rows=db.prepare(`SELECT player,buyer,reference FROM (
@@ -27,7 +34,7 @@ export function sportingRegister(db) {
     state.registrations=assignments;
     const rosters=fixtureClubs(assignments);
     for (const [side,plan] of state.plans.entries()) {
-      if (plan && validatePlan(rosters[side],plan,rosters[1-side])) {
+      if ((plan && validatePlan(rosters[side],plan,rosters[1-side])) || (!plan && side===1 && state.computerAway)) {
         state.plans[side]=side===1 && state.computerAway ? computerPlan(rosters[side]) : null;
       }
     }
@@ -37,6 +44,11 @@ export function sportingRegister(db) {
     create(fn,state) { return atomic(()=>{project(state); return fn();}); },
     observe({player,mint,genesis,bb,sponsor,reference,seller,buyer,terms}) {
       return atomic(()=>{
+        checkPilot(genesis,bb,sponsor);
+        for (const [wallet,club] of [[terms.listing?.seller,seller],[terms.buyer,buyer]]) {
+          if (wallet && conflictingWallet.get(String(wallet),club,String(wallet),club))
+            throw new Error('An existing wallet cannot change its club mapping.');
+        }
         db.prepare('INSERT OR IGNORE INTO sporting_players VALUES(?,?,?,?,?)').run(player,mint,genesis,bb,sponsor);
         if (!db.prepare('SELECT 1 FROM sporting_players WHERE player=? AND mint=? AND genesis=? AND bb=? AND sponsor=?')
           .get(player,mint,genesis,bb,sponsor)) throw new Error('Conflicting pilot player or network binding.');
@@ -48,7 +60,8 @@ export function sportingRegister(db) {
         return row.status;
       });
     },
-    unresolved(genesis) {
+    unresolved({genesis,bbMint,sponsor}) {
+      checkPilot(genesis,bbMint,sponsor);
       return db.prepare(`SELECT reference,terms,status FROM sporting_sales JOIN sporting_players USING(player)
         WHERE genesis=? AND status IN ('pending','expired') ORDER BY sporting_sales.rowid`).all(genesis);
     },

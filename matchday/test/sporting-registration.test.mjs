@@ -84,6 +84,13 @@ test('a stale purchase or changed wallet cannot register a player, and retries r
   assert.deepEqual(db.registration.status(),[]);
   await read([journal,journal]);
   assert.equal(db.registration.status().length,1);
+  const replacement={...listing,version:Keypair.generate().publicKey};
+  const next=purchaseListing(replacement,away.publicKey);
+  next.sign(operator,home,away);
+  const newJournal={...journal,listing:replacement,purchase:next.serialize().toString('base64')};
+  await assert.rejects(read([newJournal],{...config,wallets:{[home.publicKey]:'eastport',[away.publicKey]:'northbank'}}),/club mapping/);
+  await assert.rejects(read([],{...config,bbMint:version.toBase58()}),/different registration/);
+  assert.equal(db.registration.status().length,1);
   height=51;
   status={confirmationStatus:'finalized',err:null};
   await read([]);
@@ -95,6 +102,37 @@ test('a stale purchase or changed wallet cannot register a player, and retries r
   await read([]);
   assert.equal(db.registration.status()[0].status,'failed');
   assert.equal(db.registration.status()[0].firstFixture,null);
+});
+
+test('a computer club without a legal XI forfeits and can field a returned goalkeeper',async t=>{
+  const db=openStore(':memory:');t.after(()=>db.close());
+  const scheduled=async deadline=>(await call(db,'',start,null,{
+    opponent:'computer',kickoffAt:deadline+TEAM_SHEET_LOCK_MS})).data;
+  const firstGame=await scheduled(first);
+  for (const number of [1,12]) {
+    const player='eastport-'+number;
+    db.registration.observe({...sale,player,mint:player,reference:player,seller:'eastport',buyer:'northbank'});
+    requestSale(db,player,number,start+1,start+2);
+  }
+  const nextGame=await scheduled(first+7200000);
+  for (const game of [firstGame,nextGame]) {
+    const path='/'+game.id;
+    const {data}=await call(db,path,start+5,game.key);
+    assert.deepEqual(data.ready,[false,false]);
+    const preview=await call(db,path+'/preview',start+5,game.key,{
+      plan:data.defaults[0],phase:'inPossession',zone:'attack'});
+    assert.equal(preview.status,400);
+    assert.equal((await call(db,path+'/ready',start+6,game.key,data.defaults[0])).status,200);
+  }
+  await playDueFixtures(db,first+TEAM_SHEET_LOCK_MS);
+  assert.equal(JSON.parse(db.read(firstGame.id).state).result.kind,'forfeit');
+  const player='eastport-1';
+  db.registration.observe({...sale,player,mint:player,reference:'returned-keeper'});
+  requestSale(db,'returned-keeper',13,first+TEAM_SHEET_LOCK_MS+1,first+TEAM_SHEET_LOCK_MS+2);
+  const {data}=await call(db,'/'+nextGame.id,first+TEAM_SHEET_LOCK_MS+3,nextGame.key);
+  assert.deepEqual(data.ready,[true,true]);
+  await playDueFixtures(db,first+7200000+TEAM_SHEET_LOCK_MS);
+  assert.ok(JSON.parse(db.read(nextGame.id).state).live);
 });
 
 test('cutoff equality, roster snapshots at creation, and delayed earlier slots cannot undo a resale',async t=>{

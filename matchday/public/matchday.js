@@ -606,6 +606,7 @@ function teamPanel() {
   const preview = previewOn && !model.live && !model.result;
   const players = sheetPlayers(draft);
   const current = players.find(p => p.id === selectedRolePlayer) ?? players.find(p => p.position === 'FW') ?? players[0];
+  if (!current) return '<section class="card"><h2>Team sheet</h2><p>This club has no registered players.</p></section>';
   selectedRolePlayer = current.id;
   const lineup = `<section class="card lineup-card"><div class="card-head"><div><h2>Starting XI</h2>
     <p class="hint">${locked() ? 'Confirmed lineup' : 'Select a shirt to change a player or edit their role.'}</p></div><span class="label">${esc(shape)}</span></div>
@@ -617,13 +618,13 @@ function teamPanel() {
 }
 function opponentPanel() {
   const i = 1 - side(), club = model.clubs[i];
-  const players = [["finishing", "Finishing"], ["vision", "Vision"], ["tackling", "Tackling"]].map(([attribute, label]) => {
+  const players = club.squad.length ? [["finishing", "Finishing"], ["vision", "Vision"], ["tackling", "Tackling"]].map(([attribute, label]) => {
     const player = club.squad.reduce((best, candidate) =>
       (attributeValue(candidate, attribute) ?? -1) > (attributeValue(best, attribute) ?? -1) ? candidate : best);
     const value = attributeValue(player, attribute);
     if (!Number.isFinite(value)) return "";
     return `<li>${playerLink(player)}<span>${esc(positions[player.position])} · ${label} ${esc(value)}/20</span></li>`;
-  }).join("");
+  }).join("") : "";
   const known=model.result && model.plans?.[i];
   return '<div class="layout scout"><section class="card"><h2>'+esc(club.name)+'</h2><p class="hint">'+(known?'Final team sheet':'Players to watch')+'</p>'+(known?pitch(club,known,false):'<ul>'+players+'</ul>')+'</section><section class="card"><h2>Scouting report</h2><ul>'+fields.map(pos=>{const n=club.squad.filter(p=>p.position===pos).length;return '<li>'+esc(positions[pos])+'s <strong style="float:right">'+n+'</strong></li>';}).join("")+'</ul></section></div>'+roster(club,known,true);
 }

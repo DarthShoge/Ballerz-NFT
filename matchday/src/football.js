@@ -87,11 +87,13 @@ export function orderedXI(club, plan) {
   return Object.keys(formations[plan.formation]).flatMap(pos => players.filter(p => p.position === pos));
 }
 
-export function defaultPlan(club, formation = '4-4-2', tactic = 'balanced') {
+export function defaultPlan(club, formation, tactic = 'balanced') {
+  formation ??= Object.keys(formations).find(name => Object.entries(formations[name]).every(([position,count]) =>
+    club.squad.filter(player => player.position === position).length >= count)) ?? '4-4-2';
   const shape = formations[formation];
   const xi = Object.entries(shape).flatMap(([position, count]) =>
     club.squad.filter(player => player.position === position).slice(0, count).map(player => player.id));
-  return { formation, tactic, xi: club.id === clubs[1].id ? mirrorLineup(formation, xi) : xi };
+  return { formation, tactic, xi: club.id === clubs[1].id && xi.length===11 ? mirrorLineup(formation, xi) : xi };
 }
 
 export function fixtureClubs(registrations) {
