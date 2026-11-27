@@ -132,6 +132,8 @@ node --test
 node scripts/benchmark.mjs 120 20261201
 ```
 
+To preview ordinary loan terms, run `node scripts/review-loan.mjs operator.json proposed-loan.json` with the sporting registration operator file. Supply `player` (matchday ID), `borrower` (club ID), `startAt` and `endAt` (UTC epoch milliseconds). The pilot minimum is four in-game weeks. Optional `borrowerWageBps` defaults to 10000 for the full wage. The command reads the latest verified purchase and checks the owner's title account and mint together at a finalized slot. It prints a proposal for both clubs to review. Approval, activation, match eligibility, and wage accrual are subsequent stages. [Loan rules](../docs/adr/0003-schedule-league-fixtures.md) · [Wage split](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md) · [S11-05](../docs/studio/backlog.md#s11-05)
+
 To run the payout integration suite on x86-64 Linux or WSL, install the locked Node dependencies and run `bash scripts/test-payouts.sh` from this directory. It provisions an isolated validator, checksum-verifies the Solana programs, plays fixtures and starts separate settlement processes. Each run uses temporary keys, ledger and SQLite files. Set `SOLANA_TEST_VALIDATOR` to reuse an installed Agave 4.4.1 validator. GitHub requires both **Matchday regression tests** and **Solana payout integration** on pull requests to `main`.
 
 The server validates club membership, formation and eleven unique selections. Unsubmitted tactics stay in the manager's browser. In friendlies, each team sheet locks on submission and the match starts when both managers are ready. Locked team sheets stay hidden from the opponent until full time. A version check protects simultaneous submissions, so both managers see the same result.

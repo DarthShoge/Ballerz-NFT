@@ -6,6 +6,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { GAME_WEEK_MS } from '../src/world-clock.js';
 
 export async function registrationJourney(rpc,world,trial,journal,settle) {
   const fixtureDb=join(world,'sporting.sqlite'), configFile=join(world,'sporting.json');
@@ -65,6 +66,19 @@ export async function registrationJourney(rpc,world,trial,journal,settle) {
     const sheet=await api('/'+id,away.key);
     assert.ok(sheet.plans[1].xi.includes('northbank-7'));
     assert.equal(sheet.transfers.length,1);
+    const proposalFile=join(world,'proposed-loan.json');
+    const startAt=Date.now()+3600000;
+    writeFileSync(proposalFile,JSON.stringify({player:'northbank-7',borrower:'northbank',
+      startAt,endAt:startAt+4*GAME_WEEK_MS}));
+    const {stdout}=await promisify(execFile)(process.execPath,
+      [fileURLToPath(new URL('../scripts/review-loan.mjs',import.meta.url)),configFile,proposalFile],{env});
+    const proposal=JSON.parse(stdout);
+    assert.equal(proposal.status,'proposal');
+    assert.equal(proposal.parent,'eastport');
+    assert.equal(proposal.ownerWallet,String(trial.buyer));
+    assert.equal(proposal.ownershipReference,receipt.signature);
+    assert.equal(proposal.borrowerWageBps,10000);
+    assert.deepEqual((await api('/'+id,away.key)).plans,sheet.plans);
     return receipt;
   } finally {
     try { await browser?.close(); } finally { server.kill(); await closed; }
