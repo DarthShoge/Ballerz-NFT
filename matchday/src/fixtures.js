@@ -1,4 +1,4 @@
-import { clubs, defaultPlan, tactics, instructions, orderedXI, validatePlan } from './football.js';
+import { clubs, defaultPlan, fixtureClubs, tactics, instructions, orderedXI, validatePlan } from './football.js';
 import { defensiveSlotMap, formationCoordinates, formations, formationSlots, mirrorLineup } from './match-formations.js';
 import { optionsFor, roleOptions, selectedRoles } from './role-selection.js';
 import { advanceLiveFixture, liveFixtureView, orderTouchline, startLiveFixture } from './live-fixture.js';
@@ -39,8 +39,10 @@ function view(id, state, side, time, after, playtest, includeTactics) {
   const teamSheetLocked = Boolean(schedule
     ? time >= schedule.deadlineAt || state.live || state.result
     : state.plans[side]);
+  const rosters=fixtureClubs(state.registrations);
   return {
-    ...catalog, ...(includeTactics ? tacticCatalog : {}), id, side, joined: Boolean(state.computerAway || state.managers[1]),
+    ...catalog, clubs:rosters, defaults:rosters===clubs ? defaults : rosters.map(club=>defaultPlan(club)),
+    ...(includeTactics ? tacticCatalog : {}), id, side, joined: Boolean(state.computerAway || state.managers[1]),
     computerAway: Boolean(state.computerAway),
     ready: state.plans.map(Boolean), result: recordedMatchReport(state.result), teamSheetLocked,
     ...(state.appearanceReceipt ? {appearanceReceipt:state.appearanceReceipt} : {}),
@@ -121,7 +123,7 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
     return json({id, key}, 201);
   }
 
-  const match = /^\/api\/fixtures\/([a-f0-9-]{36})(?:\/(join|ready|touchline|kickoff-now|fast-forward))?$/.exec(path);
+  const match = /^\/api\/fixtures\/([a-f0-9-]{36})(?:\/(join|ready|preview|touchline|kickoff-now|fast-forward))?$/.exec(path);
   if (!match) return error('Fixture not found.', 404);
   const [, id, action] = match;
   const playtestAction = action === 'kickoff-now' || action === 'fast-forward';
@@ -130,9 +132,13 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
   if (!auth) return error('A manager key or invitation is required.', 401);
   const token = auth[1];
   const hash = await digest(token);
-  const response = (state, side) => json(view(id, state, side, receivedAt, after, playtest, !url.searchParams.has('after')));
+  const response = (state, side) => {
+    const data=view(id, state, side, receivedAt, after, playtest, !url.searchParams.has('after'));
+    if (state.schedule && !state.result && store.registration) data.transfers=store.registration.status();
+    return json(data);
+  };
   let submitted;
-  if (action === 'ready' || action === 'touchline') {
+  if (action === 'ready' || action === 'touchline' || action === 'preview') {
     try { submitted = await request.json(); } catch {
       return error(action === 'ready' ? 'Invalid team sheet.' : 'Invalid touchline order.', 400);
     }
@@ -159,6 +165,11 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
     const side = state.managers.indexOf(hash);
     if (side < 0) return error('This manager key does not match the fixture.', 403);
     if (!action) return response(state, side);
+    const rosters=fixtureClubs(state.registrations);
+    if (action==='preview') {
+      const result=tacticalPreview({...submitted,side},rosters);
+      return json(result,result.error ? 400 : 200);
+    }
     if (playtestAction) {
       if (!playtest || side !== 0) return error('Playtest controls are available to the home manager in playtest mode.', 403);
       if (action === 'kickoff-now') {
@@ -191,13 +202,13 @@ export async function fixtureApi(request, store, {worldStart = null, receivedAt 
     if (state.schedule && (receivedAt >= state.schedule.deadlineAt || state.live || state.result)) {
       return error('The team-sheet deadline has passed.', 409);
     }
-    const problem = validatePlan(clubs[side], submitted);
+    const problem = validatePlan(rosters[side], submitted,rosters[1-side]);
     if (problem) return error(problem, 400);
     const plan = {formation: submitted.formation, tactic: submitted.tactic, xi: submitted.xi};
     if (submitted.defensiveFormation && submitted.defensiveFormation !== 'same') plan.defensiveFormation = submitted.defensiveFormation;
     if (submitted.playerRoles) {
       const roles = {};
-      for (const [index, player] of orderedXI(clubs[side], plan).entries()) {
+      for (const [index, player] of orderedXI(rosters[side], plan).entries()) {
         const pair = selectedRoles(null, submitted.playerRoles[player.id], optionsFor(plan.formation, plan.defensiveFormation, index));
         if (Object.keys(pair).length) roles[player.id] = pair;
       }

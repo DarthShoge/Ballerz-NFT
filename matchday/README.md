@@ -108,6 +108,12 @@ To enable the pilot, set `BALLERZ_LISTING_SPONSOR` to the path to the capped Dev
 
 Install the test browser with `pnpm exec playwright install --with-deps chromium` before running the validator suite. It drives the seller page in Chromium against a fresh local validator using a disposable wallet.
 
+### Sporting registration for scheduled matchday fixtures
+
+Run `node scripts/register-transfers.mjs operator.json` to reconcile signed purchases into the local matchday SQLite database. Add `--watch` to poll every 15 seconds. The operator config identifies the same `fixtureDb` used by the matchday server, the approved public `sponsor` and `bbMint`, the `players` map (title mint to existing matchday player ID), and the `wallets` map (wallet address to Northbank or Eastport club ID). Use `northbank` and `eastport` as the IDs. Supply `journals` as an array of signed trial file paths or `grantLedger` as the grant database path. Paths resolve relative to the config. Keep the file and financial journals private. The worker reads the financial source and Devnet without a signer. For a local validator, pin `validatorGenesis` and set `BALLERZ_DEVNET_RPC` to its loopback RPC URL.
+
+Both managers see the same purchase reference in their scheduled fixture. Registration requires finalized transfer evidence for the exact signed terms and the single player title. The block time determines the settlement time. A timely verified sale updates the squads of open fixtures, and a manager whose submitted XI becomes invalid must submit a valid replacement before lock. A late index update leaves locked squads and recorded matches intact. The first eligible fixture is the earliest scheduled sheet that actually received that registration. Reloading the worker recovers pending references from the matchday database. [Founder team-sheet rule](../docs/studio/founder-rules.md) · [S11-04](../docs/studio/backlog.md#s11-04)
+
 ### Grant-funded transfers (closed pilot)
 
 The grant ledger records the purchase bursary against a player mint. A signed sale pays the treasury up to the outstanding claim, pays the seller any surplus and funds payroll separately in one Solana transaction. An independent sale records the shortfall as a treasury loss. A connected sale carries it into the buyer's next sale. The original allocation can only be registered once. [Founder decision](../docs/studio/founder-rules.md#grant-loss) · [S11-03 acceptance cases](../docs/studio/backlog.md#s11-03)

@@ -188,10 +188,13 @@ function applyModel(next,initial=false) {
   const wasLive=Boolean(model?.live);
   if (next.roleOptions) tacticsCatalog = {roleOptions: next.roleOptions, formations: next.formations, formationSlots: next.formationSlots,
     defensiveSlotMap: next.defensiveSlotMap, formationCoordinates: next.formationCoordinates, markingPositions:next.markingPositions, individualInstructions:next.individualInstructions};
+  const rostersChanged=model && next.clubs.some((club,i)=>
+    club.squad.map(p=>p.id).join()!==model.clubs[i].squad.map(p=>p.id).join());
   model=next;
   liveCursor=next.live?.frames.at(-1)?.seq ?? -1;
   if (Number.isFinite(next.serverTime)) serverClockObservedAt = performance.now();
-  if (initial || !draft || locked()) draft=restoreDraft(model.plans?.[side()] || model.defaults[side()]);
+  if (initial || !draft || locked() || rostersChanged) draft=restoreDraft(model.plans?.[side()] || model.defaults[side()]);
+  if (rostersChanged) previewState.key=null;
   if (model.result && (!wasResult || initial)) {
     currentTab = "report";
     reportSide = null;
@@ -221,7 +224,9 @@ async function enterSession(session,fromLanding=false) {
   const next=await api(fixturePath(),{token:key});
   currentTab="team";selectedRolePlayer=null;invitation="";rosterGroup="technical";reportSide=null;
   applyModel(next,true);
-  if(previousDraft && !locked()) {draft=previousDraft;persistDraft();render();}
+  if(previousDraft && !locked() && previousDraft.xi.every(id=>model.clubs[side()].squad.some(p=>p.id===id))) {
+    draft=clonePlan(previousDraft);persistDraft();render();
+  }
   startPolling();
 }
 function startPolling() {
@@ -274,7 +279,24 @@ function scoreboard() {
   const played = result ?? model.live;
   const score = played ? played.score?.map(esc).join(' – ') ?? '—' : 'VS';
   return '<section class="board" aria-label="Fixture"><div class="board-top"><span class="micro">'+esc(fixtureLabel)+'</span><span class="status"><i></i>'+status+'</span></div><div class="teams">'+teams[0]+'<span class="versus '+(played?'final':'')+'">'+score+'</span>'+teams[1]+'</div><div class="board-bottom">'+(real?'You manage '+esc(model.clubs[side()].name):'Two managers · 90 minutes')+'</div>'+
-    (scheduleLabel ? '<div class="fixture-times">'+scheduleLabel+'</div>' : '')+'</section>';
+    (scheduleLabel ? '<div class="fixture-times">'+scheduleLabel+'</div>' : '')+'</section>'+transferStatus();
+}
+function transferStatus() {
+  if (!model.transfers?.length) return '';
+  const rows=model.transfers.map(sale=>{
+    const roster=model.clubs.find(club=>club.squad.some(p=>p.id===sale.player));
+    const player=roster?.squad.find(p=>p.id===sale.player);
+    const buyer=model.clubs.find(club=>club.id===sale.buyer);
+    let detail={pending:'Awaiting finalized settlement',failed:'Settlement failed',expired:'Signed purchase expired'}[sale.status];
+    if (sale.status==='finalized') {
+      const eligible=sale.firstFixture===id ? 'First eligible fixture is this match.' :
+        sale.firstFixture ? 'First eligible fixture: '+sale.firstFixture+'.' : 'No scheduled fixture currently uses this registration.';
+      detail='Finalized for '+buyer.name+' · '+localTime.format(new Date(sale.effectiveAt))+'. '+eligible+
+        ' Registered for this fixture: '+roster.name+'.';
+    }
+    return '<li>'+esc(player.name)+' · '+esc(detail)+'<br>Transfer reference <code>'+esc(sale.reference)+'</code></li>';
+  });
+  return '<section class="card registration"><h2>Transfer registration</h2><ul>'+rows.join('')+'</ul></section>';
 }
 function heading() {
   let action="";
@@ -372,11 +394,11 @@ function syncShapePreview() {
   const target = document.getElementById("shape-preview");
   if (!target) return;
   const body = {plan:draft, side:side(), phase:shapePhase, zone:previewZone};
-  const key = JSON.stringify(body);
-  if (previewState.key !== key) {
-    const request = {key, result:null, error:""};
+  const previewKey = JSON.stringify(body);
+  if (previewState.key !== previewKey) {
+    const request = {key:previewKey, result:null, error:""};
     previewState = request;
-    api("/api/tactics/preview", {method:"POST",body}).then(result => {
+    api(active()?fixturePath()+"/preview":"/api/tactics/preview", {method:"POST",token:active()?key:undefined,body}).then(result => {
       if (previewState !== request) return;
       request.result = result;
       syncShapePreview();

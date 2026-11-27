@@ -5,17 +5,17 @@ import {movePlayers} from './match-pitch.js';
 
 const ballDepth = {defence: 20, midfield: 52.5, attack: 83};
 
-export function tacticalPreview(input) {
+export function tacticalPreview(input, rosters = clubs) {
   const {side, plan, phase, zone} = input ?? {};
   if (![0,1].includes(side) || !['inPossession','outOfPossession'].includes(phase)
       || typeof zone !== 'string' || !Object.hasOwn(ballDepth, zone)) {
     return {error: 'Choose a team, a phase and a third of the pitch.'};
   }
-  const problem = validatePlan(clubs[side], plan);
+  const problem = validatePlan(rosters[side], plan, rosters[1-side]);
   if (problem) return {error: problem};
-  const plans = clubs.map(club => defaultPlan(club));
+  const plans = rosters.map(club => defaultPlan(club));
   plans[side] = plan;
-  const {teams} = startMatch(matchTeams(plans), () => 0.5);
+  const {teams} = startMatch(matchTeams(plans,rosters), () => 0.5);
   const relative = ({x,y}) => side ? {x: 105 - x, y: 68 - y} : {x,y};
   const ball = relative({x: ballDepth[zone], y: 27});
   const possessionSide = phase === 'inPossession' ? side : 1 - side;
