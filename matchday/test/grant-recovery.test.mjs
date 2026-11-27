@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
+import { AccountLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { settleTrial, signTrial } from '../scripts/transfer-trial.mjs';
 import { grantSettlement, purchaseListing } from '../src/player-transfer.js';
 import { openGrantLedger } from '../src/grant-ledger.js';
 
@@ -16,6 +18,45 @@ test('purchase grant splits conserve both the price and the original claim in wh
   }
   for (const args of [[0,1,'connected'],[1,-1,'independent'],[2,1.5,'connected'],[1,1,'unknown']])
     assert.throws(()=>grantSettlement(...args));
+});
+
+test('an uncertain purchase keeps its reservation until finalized expiry and seller title agree',async t=>{
+  const [payer,home,away]=Array.from({length:3},()=>Keypair.generate());
+  const [bbMint,playerMint,treasury,block]=Array.from({length:4},()=>Keypair.generate().publicKey);
+  const ledger=openGrantLedger(':memory:',{genesis:'local',treasury,controlGroups:new Map(
+    [[home.publicKey.toBase58(),'A'],[away.publicKey.toBase58(),'B']])});
+  t.after(()=>ledger.close());
+  const terms={bbMint,playerMint,seller:home.publicKey,sponsor:payer.publicKey,price:150000,wages:30000};
+  await ledger.register(terms,200000);
+  let height=20, amount=1n;
+  const rpc={
+    getGenesisHash:async()=>'local',
+    getMinimumBalanceForRentExemption:async()=>2500000,
+    getLatestBlockhash:async()=>({blockhash:block.toBase58(),lastValidBlockHeight:20}),
+    getTransaction:async()=>null,
+    getSignatureStatuses:async()=>({value:[null]}),
+    isBlockhashValid:async()=>({value:false}),
+    getBlockHeight:async()=>height,
+    getAccountInfo:async()=>{
+      const data=Buffer.alloc(AccountLayout.span);
+      AccountLayout.encode({mint:playerMint,owner:home.publicKey,amount,state:1,
+        delegateOption:0,delegate:PublicKey.default,isNativeOption:0,isNative:0n,
+        delegatedAmount:0n,closeAuthorityOption:0,closeAuthority:PublicKey.default},data);
+      return {data,owner:TOKEN_PROGRAM_ID};
+    }
+  };
+  const reviewedTerms=ledger.quote(terms,away.publicKey);
+  const sale=await signTrial(rpc,payer,home,away,{bbMint,playerMint},{ledger,reviewedTerms});
+  await assert.rejects(settleTrial(rpc,sale,ledger),/expired/);
+  assert.ok(ledger.pending(playerMint));
+  height++;
+  amount=0n;
+  await assert.rejects(settleTrial(rpc,sale,ledger),/expired/);
+  assert.ok(ledger.pending(playerMint));
+  amount=1n;
+  await assert.rejects(settleTrial(rpc,sale,ledger),/expired/);
+  assert.equal(ledger.pending(playerMint),undefined);
+  assert.deepEqual(ledger.quote(terms,away.publicKey),reviewedTerms);
 });
 
 test('operator grants bind title, owner, currency, buyer group and treasury before approval',async t=>{
