@@ -108,6 +108,17 @@ To enable the pilot, set `BALLERZ_LISTING_SPONSOR` to the path to the capped Dev
 
 Install the test browser with `pnpm exec playwright install --with-deps chromium` before running the validator suite. It drives the seller page in Chromium against a fresh local validator using a disposable wallet.
 
+### Grant-funded transfers (closed pilot)
+
+The grant ledger records the purchase bursary against a player mint. A signed sale pays the treasury up to the outstanding claim, pays the seller any surplus and funds payroll separately in one Solana transaction. An independent sale records the shortfall as a treasury loss. A connected sale carries it into the buyer's next sale. The original allocation can only be registered once. [Founder decision](../docs/studio/founder-rules.md#grant-loss) · [S11-03 acceptance cases](../docs/studio/backlog.md#s11-03)
+
+The operator keeps a private JSON configuration with `ledger` (SQLite path), `treasury` (a dedicated public wallet), `controlGroups` (verified wallet-to-group map), and optional `reviewHolds` (entries with `clubs` and an appealable `reason`). Keep one authoritative ledger and back it up with the signing service. Unknown clubs and held pairs require operator review. The current browser rehearsal uses the original grant-free winger. Grant-bearing sales use the operator flow below.
+
+- Record an actual funded allocation with `node scripts/grant-sale.mjs register operator.json allocation.json`. Supply public `playerMint`, `bbMint`, `seller`, `sponsor` and whole-BB `claim`. Registration records the funding event and does not disburse BB.
+- Review the split before approval with `node scripts/grant-sale.mjs review operator.json terms.json`. Supply the same public accounts plus `buyer`, `price` and `wages`. The review shows both the treasury write-off and the claim the buyer would inherit.
+- The closed trial's `signTrial` takes the ledger and reviewed price and wages. It binds the split to both clubs' signatures and reserves the sale before returning the signed journal. The operator submits it with `node scripts/grant-sale.mjs settle operator.json signed-trial.json`. Quarantine a database or chain discrepancy before issuing more signatures.
+- After a restart or unknown RPC outcome, run `node scripts/grant-sale.mjs recover operator.json PLAYER_MINT` to use the reserved signatures. A finalized purchase updates the owner, remaining claim and receipt together; a retry returns the stored receipt. An expired or failed purchase can release the reservation after reconciliation.
+
 The browser checks the token instructions, player mint, delegate, fee payer and signed terms before opening the wallet. Offer expiry stops purchases. If a delegate remains on the title account, the seller can still revoke it. The desk defaults to 12 sponsored requests per trial mint across restarts in the same database, with one slot reserved for cancellation. Failed and expired submissions count because they can incur fees. Set `BALLERZ_LISTING_REQUEST_LIMIT` to change the pilot allowance; keep the same ledger when restarting.
 
 ```sh

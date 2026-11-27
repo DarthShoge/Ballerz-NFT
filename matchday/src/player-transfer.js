@@ -14,6 +14,18 @@ export function transferTerms({price, wages}) {
   return {price, wages, total:price + wages};
 }
 
+export function grantSettlement(price, claim, relationship) {
+  if (!Number.isSafeInteger(price) || price <= 0 || !Number.isSafeInteger(claim) || claim < 0)
+    throw new Error('Invalid whole-BB grant or sale price.');
+  if (!['connected','independent'].includes(relationship))
+    throw new Error('Club control must be reviewed before settlement.');
+  const recovered = Math.min(price, claim);
+  const shortfall = claim - recovered;
+  return {recovered, sellerProceeds:price - recovered,
+    carried:relationship === 'connected' ? shortfall : 0,
+    writtenOff:relationship === 'independent' ? shortfall : 0};
+}
+
 function validate(listing) {
   transferTerms(listing);
   if (listing.sponsor.equals(listing.seller) || listing.playerMint.equals(listing.bbMint))
@@ -31,10 +43,23 @@ function transaction(listing) {
 }
 
 function termsMemo(listing, action) {
+  if (listing.grant && action==='transfer') {
+    // Mint, listing delegate, recipients and authorities already appear in the
+    // payment instructions. Keep the buyer's signed memo within packet size.
+    const {revision,claim,relationship} = listing.grant;
+    return new TransactionInstruction({programId:memoProgram, keys:[], data:Buffer.from(JSON.stringify({
+      v:2,action,price:listing.price,wages:listing.wages,expires:listing.lastValidBlockHeight,
+      claim,relationship,revision,disclosures:listing.disclosures
+    }))});
+  }
   return new TransactionInstruction({programId:memoProgram, keys:[], data:Buffer.from(JSON.stringify({
     v:1, action, listing:listing.version.toBase58(), bb:listing.bbMint.toBase58(),
     price:listing.price, wages:listing.wages, expires:listing.lastValidBlockHeight,
-    disclosures:listing.disclosures
+    disclosures:listing.disclosures,
+    // The buyer-specific grant quote is signed by all parties. Legacy
+    // zero-grant listings retain their original wire format for recovery.
+    grant:listing.grant && [listing.grant.revision,listing.grant.claim,listing.grant.relationship,
+      listing.grant.treasury,listing.grant.buyer]
   }))});
 }
 
@@ -69,12 +94,22 @@ export function purchaseListing(listing, buyer) {
   const {seller,sponsor,bbMint,playerMint,price,wages,version} = listing;
   if (buyer.equals(seller) || buyer.equals(sponsor)) throw new Error('Independent club wallets required.');
   const tx = transaction(listing);
+  const grant = listing.grant;
+  const split = grant && grantSettlement(price,grant.claim,grant.relationship);
+  const treasury = grant && new PublicKey(grant.treasury);
+  if (grant && (grant.buyer !== buyer.toBase58() || [buyer,seller,sponsor].some(key=>key.equals(treasury))))
+    throw new Error('Grant beneficiary or buyer conflicts with the approved sale.');
   // The pilot's separate payroll ATA is controlled by the operator. Neither club
   // can withdraw from it. A production payroll programme is a separate milestone.
   for (const [mint,owner] of [[bbMint,buyer],[bbMint,seller],[bbMint,sponsor],[playerMint,seller],[playerMint,buyer]]) {
     tx.add(createAssociatedTokenAccountIdempotentInstruction(sponsor,ata(mint,owner),owner,mint));
   }
-  tx.add(createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,seller),buyer,BigInt(price),0));
+  if (split?.recovered) {
+    tx.add(createAssociatedTokenAccountIdempotentInstruction(sponsor,ata(bbMint,treasury),treasury,bbMint),
+      createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,treasury),buyer,BigInt(split.recovered),0));
+  }
+  const proceeds = split?.sellerProceeds ?? price;
+  if (proceeds) tx.add(createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,seller),buyer,BigInt(proceeds),0));
   if (wages) tx.add(createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,sponsor),buyer,BigInt(wages),0));
   tx.add(createTransferCheckedInstruction(ata(playerMint,seller),playerMint,ata(playerMint,buyer),version,1n,0,
     [seller,sponsor]),termsMemo(listing,'transfer'));
@@ -104,9 +139,12 @@ export function verifyTransfer(record, signed, listing, buyer) {
     if (post-pre !== BigInt(expected)) throw new Error('Incorrect transfer balance change.');
     return {account:key.toBase58(),before:pre.toString(),after:post.toString()};
   }
+  const grant = listing.grant;
+  const split = grant && grantSettlement(listing.price,grant.claim,grant.relationship);
   return {slot:record.slot,blockTime:record.blockTime,listing:listing.version.toBase58(),
+    ...(grant && {grant:{...grant,...split}, ...(split.recovered && {treasuryBB:change(listing.bbMint,new PublicKey(grant.treasury),split.recovered)})}),
     buyerBB:change(listing.bbMint,buyer,-(listing.price+listing.wages)),
-    sellerBB:change(listing.bbMint,listing.seller,listing.price),
+    sellerBB:change(listing.bbMint,listing.seller,split?.sellerProceeds ?? listing.price),
     wageReserve:change(listing.bbMint,listing.sponsor,listing.wages),
     sellerTitle:change(listing.playerMint,listing.seller,-1),buyerTitle:change(listing.playerMint,buyer,1)};
 }
