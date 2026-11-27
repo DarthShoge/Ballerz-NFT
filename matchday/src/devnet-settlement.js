@@ -4,7 +4,7 @@ import {
   PublicKey, SystemProgram, Transaction, TransactionInstruction, sendAndConfirmTransaction
 } from '@solana/web3.js';
 import {
-  AuthorityType, MINT_SIZE, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID, AuthorityType, MINT_SIZE, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction,
   createInitializeMint2Instruction, createMintToInstruction, createSetAuthorityInstruction,
   createTransferCheckedInstruction, getAssociatedTokenAddressSync, getMint, getAccount
 } from '@solana/spl-token';
@@ -69,6 +69,10 @@ export async function appearanceBatch(id, state, payer, accounts, lamports) {
   }));
   for (const side of sides) transaction.add(createTransferCheckedInstruction(
     accounts.vault, accounts.mint, accounts.clubs[side], payer, APPEARANCE_BB, 0));
+  // All destinations already exist. Validate their current owners in the same
+  // atomic batch, so an owner mismatch rolls every transfer back.
+  for (const side of sides) transaction.add(createAssociatedTokenAccountIdempotentInstruction(
+    payer, accounts.clubs[side], accounts.owners[side], accounts.mint));
   transaction.add(new TransactionInstruction({programId:memoProgram, keys:[], data:Buffer.from(memo)}));
   return {transaction, marker, memo, sides};
 }
@@ -80,23 +84,33 @@ export function verifyPayout(tx, batch, accounts, payer) {
   if (!message.accountKeys[0].signer || !message.accountKeys[0].pubkey.equals(payer))
     throw new Error('Unexpected settlement authority.');
   const first = message.instructions[0]?.parsed;
+  const ownerChecks = message.instructions.slice(1 + batch.sides.length, -1);
+  // Earlier finalized Devnet receipts have no ATA instructions. Their finalized
+  // token-balance evidence also records the owner at execution time.
+  if (ownerChecks.length && (ownerChecks.length !== batch.sides.length || ownerChecks.some((ix,i) => {
+    const side = batch.sides[i];
+    return !ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID) || ix.parsed?.type !== 'createIdempotent'
+      || ix.parsed.info.wallet !== address(accounts.owners[side]) || ix.parsed.info.account !== address(accounts.clubs[side])
+      || ix.parsed.info.mint !== address(accounts.mint);
+  }))) throw new Error('Club token-account ownership instruction mismatch.');
   if (!message.instructions[0].programId.equals(SystemProgram.programId)
       || first?.type !== 'createAccountWithSeed' || first.info.newAccount !== address(batch.marker)
       || first.info.owner !== address(memoProgram) || first.info.source !== address(payer)
-      || message.instructions.length !== batch.sides.length + 2)
+      || message.instructions.length !== batch.sides.length + ownerChecks.length + 2)
     throw new Error('Fixture receipt instruction mismatch.');
   const memo = message.instructions.at(-1);
   if (!memo.programId.equals(memoProgram) || memo.parsed !== batch.memo) throw new Error('Result attestation mismatch.');
-  function amounts(key) {
+  function amounts(key, owner) {
     const index = message.accountKeys.findIndex(entry => entry.pubkey.equals(key));
     const read = balances => {
       const row = balances?.find(item => item.accountIndex === index && item.mint === address(accounts.mint));
-      if (!row || row.uiTokenAmount.decimals !== 0) throw new Error('Missing BB balance evidence.');
+      if (!row || row.owner !== address(owner) || row.uiTokenAmount.decimals !== 0)
+        throw new Error('Missing or inconsistent BB balance ownership evidence.');
       return BigInt(row.uiTokenAmount.amount);
     };
     return [read(tx.meta.preTokenBalances), read(tx.meta.postTokenBalances)];
   }
-  const [before, after] = amounts(accounts.vault);
+  const [before, after] = amounts(accounts.vault, payer);
   if (before - after !== BigInt(APPEARANCE_BB * batch.sides.length)) throw new Error('Treasury debit mismatch.');
   return batch.sides.map((side, index) => {
     const instruction = message.instructions[index + 1];
@@ -106,7 +120,7 @@ export function verifyPayout(tx, batch, accounts, payer) {
         || transfer.info.source !== address(accounts.vault) || transfer.info.destination !== address(accounts.clubs[side])
         || transfer.info.tokenAmount.amount !== String(APPEARANCE_BB))
       throw new Error('Appearance transfer mismatch.');
-    const [pre, post] = amounts(accounts.clubs[side]);
+    const [pre, post] = amounts(accounts.clubs[side], accounts.owners[side]);
     if (post - pre !== BigInt(APPEARANCE_BB)) throw new Error('Club credit mismatch.');
     return {club:side === 0 ? 'northbank' : 'eastport', owner:address(accounts.owners[side]),
       tokenAccount:address(accounts.clubs[side]), before:pre.toString(), after:post.toString(), bb:APPEARANCE_BB};
@@ -116,10 +130,13 @@ export function verifyPayout(tx, batch, accounts, payer) {
 export async function settleAppearance(connection, payer, accounts, id, state) {
   const rent = await connection.getMinimumBalanceForRentExemption(0);
   const batch = await appearanceBatch(id, state, payer.publicKey, accounts, rent);
-  if (!batch.sides.length) return {status:'no eligible clubs', fixture:id, payments:[]};
-  let signature;
-  let recovered = false;
-  if (!await connection.getAccountInfo(batch.marker, finality)) {
+  if (!batch.sides.length) {
+    if (state.appearanceReceipt?.signature) throw new Error('Paid receipt conflicts with fixture eligibility.');
+    return {status:'no eligible clubs', fixture:id, payments:[]};
+  }
+  let signature = state.appearanceReceipt?.signature;
+  let recovered = Boolean(signature);
+  if (!signature && !await connection.getAccountInfo(batch.marker, finality)) {
     try { signature = await sendAndConfirmTransaction(connection, batch.transaction, [payer], options); }
     catch (error) {
       // Preflight can see a competing payment before the winner has finalized.

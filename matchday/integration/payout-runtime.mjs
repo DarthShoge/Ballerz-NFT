@@ -3,9 +3,9 @@ import test from 'node:test';
 import { join } from 'node:path';
 import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import {
-  AccountLayout, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE, TOKEN_PROGRAM_ID,
+  AccountLayout, ASSOCIATED_TOKEN_PROGRAM_ID, AuthorityType, MINT_SIZE, TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction, createInitializeMint2Instruction,
-  createMintToInstruction
+  createMintToInstruction, createSetAuthorityInstruction
 } from '@solana/spl-token';
 import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
 import { appearanceBatch, treasuryAddresses } from '../src/devnet-settlement.js';
@@ -18,14 +18,15 @@ test('signed payout instructions roll back together and a new blockhash cannot p
     svm.addProgramFromFile(key,join(programs,name+'.so'));
   }
   const payer = Keypair.generate();
-  const owners = [Keypair.generate().publicKey,Keypair.generate().publicKey];
+  const clubKeys = [Keypair.generate(), Keypair.generate()];
+  const owners = clubKeys.map(key => key.publicKey);
   const accounts = await treasuryAddresses(payer.publicKey,owners);
   svm.airdrop(payer.publicKey,2_000_000_000n);
-  function send(tx) {
+  function send(tx, ...additionalSigners) {
     svm.expireBlockhash();
     tx.recentBlockhash = svm.latestBlockhash();
     tx.feePayer = payer.publicKey;
-    tx.sign(payer);
+    tx.sign(payer, ...additionalSigners);
     return svm.sendTransaction(tx);
   }
   function succeed(tx) {
@@ -60,4 +61,13 @@ test('signed payout instructions roll back together and a new blockhash cannot p
   assert.ok(duplicate instanceof FailedTransactionMetadata);
   assert.match(duplicate.meta().logs().join('\n'),/already in use/i);
   assert.deepEqual(balances(),[0n,8000n,8000n]);
+  succeed(new Transaction().add(topUp(),topUp()));
+  const changeOwner = createSetAuthorityInstruction(accounts.clubs[0],owners[0],AuthorityType.AccountOwner,owners[1]);
+  const rotated = send(new Transaction().add(changeOwner),clubKeys[0]);
+  assert.ok(!(rotated instanceof FailedTransactionMetadata),rotated.toString());
+  const another = await appearanceBatch('next-fixture',state,payer.publicKey,accounts,
+    Number(svm.minimumBalanceForRentExemption(0n)));
+  assert.ok(send(another.transaction) instanceof FailedTransactionMetadata);
+  assert.deepEqual(balances(),[16000n,8000n,8000n]);
+  assert.equal(svm.getAccount(another.marker),null);
 });
