@@ -66,6 +66,10 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   t.after(async () => {
     for (const child of children) child.kill();
     store.close();
+    // web3.js keeps the confirmation socket alive briefly after the final
+    // signature. Disconnect it before taking its validator offline.
+    rpc._rpcWebSocket.setAutoReconnect(false);
+    rpc._rpcWebSocket.close();
     validator.kill('SIGTERM');
     await stopped.catch(() => {});
     rmSync(world,{recursive:true,force:true});
