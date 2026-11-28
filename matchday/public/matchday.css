@@ -560,3 +560,6 @@
 
 .registration code { overflow-wrap: anywhere; }
 .registration li + li { margin-top: .6rem; }
+
+.club-nav{display:flex;align-items:center;gap:1rem}.club-nav a{color:inherit;text-underline-offset:.2em}.club-nav a:focus-visible{outline-color:var(--green)}
+@media(max-width:520px){.mast-inner:has(.club-nav){height:auto;min-height:55px;flex-wrap:wrap;padding-block:.5rem}.mast-inner:has(.club-nav) .online{display:none}.club-nav{gap:.75rem;font-size:.9rem}}

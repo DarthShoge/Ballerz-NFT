@@ -134,6 +134,8 @@ node scripts/benchmark.mjs 120 20261201
 
 ### Ordinary loan agreements
 
+From the match centre choose **Loans**, then **Open my inbox**. Connect the designated Solflare account and sign the short-lived read-only request. Select an agreement to review the player, dates, wage shares and counterparty. **Approve loan terms** is a separate signature. Managers with a private invitation can paste the link or reference on the same Loans screen. The operator issues offers using the procedure below.
+
 Run `node scripts/review-loan.mjs operator.json proposed-loan.json` for a read-only preview. Supply `player` (matchday ID), `borrower` (club ID), `startAt` and `endAt` (UTC epoch milliseconds). The pilot minimum is four in-game weeks. Optional `borrowerWageBps` defaults to 10000 for the full wage. The command reads the latest verified purchase and checks the owner's title account and mint together at a finalized slot. [Loan rules](../docs/adr/0003-schedule-league-fixtures.md) · [Wage split](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md) · [S11-05](../docs/studio/backlog.md#s11-05)
 
 1. In the sporting operator file, set `loanManagers` to a map from each club ID to its designated public wallet. The existing `wallets` and `players` bindings must agree. The parent signs with the wallet holding the title.
