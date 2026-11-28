@@ -7,7 +7,7 @@ const money=row=>BigInt(row.wholeBB).toLocaleString()+' test BB'+(row.remainder=
 let version=0,unwatch;
 function close() {
   version++;unwatch?.();unwatch=undefined;
-  for (const id of ['title','cutoff','total','lines','notice']) el(id).replaceChildren();
+  for (const id of ['title','cutoff','total','lines','notice','settlement']) el(id).replaceChildren();
   el('report').hidden=true;el('open').disabled=false;
 }
 async function post(path,data) {
@@ -30,6 +30,14 @@ el('lookup').onsubmit=async event=>{
     el('title').textContent=club+' · Wage year '+result.year;
     el('cutoff').textContent='Through '+time(result.asOf)+' · Year ends '+time(result.end);
     el('total').textContent=result.total?'Total accrued · '+money(result.total):'Total awaiting a published wage rate.';
+    const settled=result.settlement;
+    if (settled) {
+      const bb=value=>BigInt(value).toLocaleString()+' test BB';
+      el('settlement').textContent='Due '+bb(settled.due)+' · Paid '+bb(settled.paid)+' · Arrears '+bb(settled.arrears)+
+        ' · Reconciled '+time(settled.checkedAt)+' at finalized slot '+settled.slot+'. Only imported payments are included.';
+    } else {
+      el('settlement').textContent=result.year===result.currentYear?'This wage year is still open.':'Awaiting year-end reconciliation.';
+    }
     for (const line of result.lines) {
       const li=document.createElement('li');
       li.textContent=line.name+' · '+time(line.from)+' to '+time(line.until)+' · '+line.status+(line.amount?' · '+money(line.amount):'');

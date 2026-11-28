@@ -100,6 +100,7 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     await borrower.getByRole('button',{name:'Open statement with Solflare'}).click();
     await borrower.getByText('Northbank Athletic · Wage year 1').waitFor();
     await borrower.getByText('Total accrued · 0 test BB').waitFor();
+    await borrower.getByText('This wage year is still open.').waitFor();
     await borrower.getByText(/Jude Kavan.*scheduled/).waitFor();
   } finally {await parent.close();await borrower.close();}
 }

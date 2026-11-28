@@ -5,12 +5,13 @@ import { clubWallets } from './club-wallets.js';
 import { walletProof } from './loan-inbox.js';
 import { wageStatementMessage } from '../public/wage-statement-message.js';
 import { clubs } from './football.js';
+import { wageSettlement } from './wage-settlement.js';
 
 const names=new Map(clubs.flatMap(c=>c.squad.map(p=>[p.id,p.name])));
 const denominator=BigInt(GAME_YEAR_MS)*10000n;
 const amount=units=>({wholeBB:String(units/denominator),remainder:String(units%denominator)});
 
-export function clubLoanWages(db,loadConfig,clock=Date.now) {
+export function clubLoanWages(db,loadConfig,clock=Date.now,rpc) {
   const wallets=clubWallets(db),proof=walletProof(wageStatementMessage,clock);
   const loans=db.prepare(`SELECT a.terms,r.annualBB FROM loan_agreements a JOIN sporting_players p USING(mint)
     LEFT JOIN player_wage_rates r ON r.mint=a.mint AND r.year=?
@@ -61,7 +62,8 @@ export function clubLoanWages(db,loadConfig,clock=Date.now) {
     }
     return {club,year,currentYear,start,end,asOf,denominator:String(denominator),total:complete?amount(total):null,lines};
   }
-  return {statement,challenge(wallet,origin,requested) {
+  const settlement=wageSettlement(db,rpc,loadConfig,statement,clock);
+  return {settlement,challenge(wallet,origin,requested) {
     const {year}=calendar(requested,clock());
     return proof.challenge(wallet,origin,Boolean(manager(loadConfig(),wallet)),year);
   },read(input,origin) {
@@ -71,7 +73,9 @@ export function clubLoanWages(db,loadConfig,clock=Date.now) {
     try {
       const club=manager(loadConfig(),input.wallet);
       if (!club) throw new LoanError('Use the current manager wallet for this club.',403);
-      const result=statement(club,year);db.exec('COMMIT');return result;
+      const result=statement(club,year);
+      result.settlement=settlement.closed(club,year);
+      db.exec('COMMIT');return result;
     }
     catch(error) {db.exec('ROLLBACK');throw error;}
   }};
