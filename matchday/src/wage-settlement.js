@@ -27,6 +27,14 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     if (!Number.isSafeInteger(epoch)) throw Error('Set the shared wage calendar first.');
     const settings = config();
     const terms = payrollTerms(settings,club,epoch);
+    const addresses=JSON.stringify([settings.wageSettlement.treasury,...clubs.map(c=>settings.wageSettlement.payroll[c.id])]);
+    if (db.prepare(`WITH payroll AS (SELECT value FROM json_each(?))
+      SELECT 1 FROM sporting_wallets WHERE wallet IN payroll UNION ALL
+      SELECT 1 FROM sporting_sales WHERE json_extract(terms,'$.listing.grant.treasury') IN payroll
+        OR json_extract(terms,'$.listing.seller') IN payroll OR json_extract(terms,'$.buyer') IN payroll LIMIT 1`).get(addresses) ||
+      (db.prepare("SELECT 1 FROM pragma_database_list WHERE name='resale'").get() &&
+        db.prepare('SELECT 1 FROM resale.grant_market WHERE treasury IN (SELECT value FROM json_each(?)) LIMIT 1').get(addresses)))
+      throw Error('Choose dedicated payroll accounts outside historical club and grant treasury custody.');
     if (db.prepare('SELECT 1 FROM sporting_players WHERE genesis<>? OR bb<>? OR sponsor<>? LIMIT 1')
       .get(terms.genesis,terms.mint,terms.sponsor)) throw Error('Payroll conflicts with the registered sporting market.');
     const binding = JSON.stringify(clubs.map(c => payrollTerms(settings,c.id,epoch)));
