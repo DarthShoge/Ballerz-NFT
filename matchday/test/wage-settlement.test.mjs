@@ -12,6 +12,7 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
   const db = new DatabaseSync(':memory:'); t.after(()=>db.close());
   const epoch = 100000;
   db.exec('CREATE TABLE world_clock(id,start_at); CREATE TABLE fixtures(state); CREATE TABLE sporting_sales(status)');
+  db.exec('CREATE TABLE sporting_players(genesis,bb,sponsor)');
   db.prepare('INSERT INTO world_clock VALUES(1,?)').run(epoch);
   let now = epoch+GAME_YEAR_MS-1000, slot = 1, genesis = config.genesis;
   const rpc = {getGenesisHash:async()=>genesis,getSlot:async()=>slot,getBlockTime:async()=>Math.floor(now/1000)};
@@ -22,6 +23,20 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
   };
   const ledger = wageSettlement(db,rpc,()=>config,statement,()=>now);
   const reconcile = () => ledger.reconcile('eastport');
+  rpc.getLatestBlockhash=async()=>({blockhash:wallet(),lastValidBlockHeight:100});
+  db.prepare('INSERT INTO sporting_players VALUES(?,?,?)').run('another pilot',config.bbMint,config.sponsor);
+  await assert.rejects(ledger.prepare('eastport','1'),/sporting market/);
+  db.exec('DELETE FROM sporting_players');
+  const treasury=config.wageSettlement.treasury;
+  rpc.getLatestBlockhash=async()=>{config.wageSettlement.treasury=wallet();return {blockhash:wallet(),lastValidBlockHeight:100};};
+  await assert.rejects(ledger.prepare('eastport','1'),/terms changed/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM wage_market').get().n,0);
+  config.wageSettlement.treasury=treasury;
+  rpc.getLatestBlockhash=async()=>({blockhash:wallet(),lastValidBlockHeight:100});
+  assert.ok((await ledger.prepare('eastport','1')).unsignedTransaction);
+  config.wageSettlement.treasury=wallet();
+  await assert.rejects(reconcile(),/registered payroll market changed/);
+  config.wageSettlement.treasury=treasury;
   assert.deepEqual((await reconcile()).years,[]);
   now = epoch+2*GAME_YEAR_MS;
   db.prepare('INSERT INTO fixtures VALUES(?)').run(JSON.stringify({appearanceApproval:{},schedule:{kickoffAt:epoch}}));

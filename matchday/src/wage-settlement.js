@@ -16,23 +16,34 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     if (!Number.isSafeInteger(epoch)) throw Error('Set the shared wage calendar first.');
     const settings = config();
     const terms = payrollTerms(settings,club,epoch);
+    if (db.prepare('SELECT 1 FROM sporting_players WHERE genesis<>? OR bb<>? OR sponsor<>? LIMIT 1')
+      .get(terms.genesis,terms.mint,terms.sponsor)) throw Error('Payroll conflicts with the registered sporting market.');
     const binding = JSON.stringify(clubs.map(c => payrollTerms(settings,c.id,epoch)));
     const prior = db.prepare('SELECT binding FROM wage_market WHERE id=1').get();
     if (prior && prior.binding !== binding) throw Error('The registered payroll market changed.');
     return {terms,binding};
   }
+  function pinMarket(club,binding) {
+    if (market(club).binding !== binding) throw Error('Payroll terms changed. Review the current market.');
+    db.prepare('INSERT OR IGNORE INTO wage_market VALUES(1,?)').run(binding);
+  }
   async function checkNetwork(terms) {
     if (await rpc.getGenesisHash() !== terms.genesis) throw Error('The payroll RPC belongs to another network.');
   }
   async function prepare(club,wholeBB) {
-    const {terms} = market(club);
+    const {terms,binding} = market(club);
     await checkNetwork(terms);
     if (!/^[1-9]\d{0,19}$/.test(wholeBB)) throw Error('Choose a positive whole-BB amount.');
     const block = await rpc.getLatestBlockhash('finalized');
     const tx = new Transaction({feePayer:new PublicKey(terms.payroll),...block})
       .add(...wagePaymentInstructions(terms,BigInt(wholeBB)));
-    return {terms,wholeBB,lastValidBlockHeight:block.lastValidBlockHeight,
-      unsignedTransaction:tx.serialize({requireAllSignatures:false}).toString('base64')};
+    const unsignedTransaction = tx.serialize({requireAllSignatures:false}).toString('base64');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      pinMarket(club,binding);
+      db.exec('COMMIT');
+    } catch (error) {db.exec('ROLLBACK');throw error;}
+    return {terms,wholeBB,lastValidBlockHeight:block.lastValidBlockHeight,unsignedTransaction};
   }
   async function reconcile(club,signature) {
     const {terms,binding} = market(club);
@@ -47,11 +58,10 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     const closedYears = Math.floor((asOf-terms.epoch)/GAME_YEAR_MS);
     db.exec('BEGIN IMMEDIATE');
     try {
-      if (market(club).binding !== binding) throw Error('Payroll terms changed during reconciliation.');
+      pinMarket(club,binding);
       const previous = db.prepare('SELECT slot FROM wage_credit WHERE club=?').get(club);
       const lastYear = db.prepare('SELECT MAX(year) AS year FROM wage_closings WHERE club=?').get(club).year;
       if (previous?.slot > slot || lastYear > closedYears) throw Error('Retry with a current finalized checkpoint.');
-      db.prepare('INSERT OR IGNORE INTO wage_market VALUES(1,?)').run(binding);
       if (receipt) {
         db.prepare('INSERT OR IGNORE INTO wage_receipts VALUES(?,?,?,?)').run(signature,club,receipt.slot,receipt.amount);
         const stored = db.prepare('SELECT * FROM wage_receipts WHERE signature=?').get(signature);
