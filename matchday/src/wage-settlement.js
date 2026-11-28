@@ -17,6 +17,7 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
       PRIMARY KEY(club,year)) STRICT;
     CREATE TABLE IF NOT EXISTS wage_collection_pending (club TEXT PRIMARY KEY, signature TEXT UNIQUE NOT NULL,
       details TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS wage_collection_costs (signature TEXT PRIMARY KEY, signer TEXT NOT NULL, lamports INTEGER NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS wage_collections (signature TEXT PRIMARY KEY, club TEXT NOT NULL, sale TEXT NOT NULL,
       income TEXT NOT NULL, year INTEGER NOT NULL, amount TEXT NOT NULL, slot INTEGER NOT NULL) STRICT;`);
   function market(club) {
@@ -135,5 +136,5 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     return {...row,reservePaid:db.prepare('SELECT amount FROM wage_reserve_applied WHERE club=? AND year=?').get(club,year)?.amount??'0'};
   }
   return {prepare,reconcile:(club,signature)=>reconcile(club,signature),closed,
-    collect:wageCollector(db,rpc,market,statement,reconcile)};
+    collect:wageCollector(db,rpc,market,statement,reconcile,config)};
 }

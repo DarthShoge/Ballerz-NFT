@@ -22,7 +22,8 @@ export async function collectionJourney(rpc,payer,seller,world,assets,receipt) {
     const mint=assets.bbMint,treasury=Keypair.generate().publicKey,payroll=Keypair.generate();
     const config={genesis:await rpc.getGenesisHash(),sponsor:String(payer.publicKey),bbMint:String(mint),
       wallets:{[seller.publicKey]:'eastport'},wageSettlement:{treasury:String(treasury),
-        payroll:{eastport:String(payroll.publicKey),northbank:String(Keypair.generate().publicKey)}}};
+        payroll:{eastport:String(payroll.publicKey),northbank:String(Keypair.generate().publicKey)},
+        collectionBudgetLamports:{[payer.publicKey]:10000000,[payroll.publicKey]:0}}};
     const ata=owner=>getAssociatedTokenAddressSync(mint,owner);
     const send=(tx,...others)=>sendAndConfirmTransaction(rpc,tx,[payer,...others],{commitment:'finalized'});
     await send(new Transaction().add(
@@ -38,6 +39,8 @@ export async function collectionJourney(rpc,payer,seller,world,assets,receipt) {
     await assert.rejects(collect('reserve',payroll),/source signer/);
     await send(new Transaction().add(createApproveCheckedInstruction(ata(seller.publicKey),mint,payroll.publicKey,
       seller.publicKey,5n,0)),seller);
+    await assert.rejects(collect('proceeds',payroll),/fee and rent budget/);
+    config.wageSettlement.collectionBudgetLamports[payroll.publicKey]=10000000;
     const lostReply=new Proxy(rpc,{get(target,field) {
       if (field==='confirmTransaction') return async(...args)=>{
         await target.confirmTransaction(...args);throw Error('Connection interrupted after submission.');
@@ -47,12 +50,13 @@ export async function collectionJourney(rpc,payer,seller,world,assets,receipt) {
     await assert.rejects(open(lostReply).collect('eastport','proceeds',payroll),/interrupted/);
     assert.equal((await collect('proceeds',payroll)).amount,'5');
     assert.equal((await collect('proceeds',payroll)).status,'no eligible funds');
-    assert.equal((await collect('reserve',payer)).amount,'30000');
-    assert.equal((await collect('reserve',payer)).status,'no eligible funds');
     const rest=debt-30005n;
     await send(new Transaction().add(createTransferCheckedInstruction(ata(seller.publicKey),mint,ata(payroll.publicKey),
       seller.publicKey,rest+1n,0)),seller);
     assert.equal((await collect('income',payroll)).amount,String(rest));
+    assert.equal((await collect('income',payroll)).status,'no eligible funds');
+    assert.equal((await collect('reserve',payer)).amount,'30000');
+    assert.equal((await collect('reserve',payer)).status,'no arrears');
     assert.equal((await collect('income',payroll)).status,'no arrears');
     assert.equal((await rpc.getTokenAccountBalance(ata(treasury),'finalized')).value.amount,String(debt));
     assert.equal((await rpc.getTokenAccountBalance(ata(payroll.publicKey),'finalized')).value.amount,'1');

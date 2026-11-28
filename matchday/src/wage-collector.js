@@ -41,13 +41,26 @@ function verifyCollection(record,tx,terms,source,amount) {
   }
 }
 
-export function wageCollector(db,rpc,market,statement,reconcile) {
+export function wageCollector(db,rpc,market,statement,reconcile,config) {
   const pending=club=>db.prepare('SELECT * FROM wage_collection_pending WHERE club=?').get(club);
   function quote(terms,closing,mode,balance,income='') {
     const prior=(sale,income='')=>db.prepare('SELECT amount FROM wage_collections WHERE club=? AND sale=? AND income=?').all(terms.club,sale,income)
       .reduce((sum,row)=>sum+BigInt(row.amount),0n);
     if (mode!=='reserve') {
-      const debt=closing.years.reduce((sum,y)=>sum+BigInt(y.arrears),0n);
+      let debt=0n;
+      for (const year of closing.years) {
+        const outstanding=BigInt(year.arrears);
+        if (!outstanding) continue;
+        let earmarked=0n;
+        for (const reserve of clubReserves(db,terms,year.year,closing.asOf,statement)) {
+          const remaining=reserve.limit-prior(reserve.reference);
+          if (remaining>0n) earmarked+=remaining;
+        }
+        debt+=outstanding-minimum(outstanding,earmarked);
+        // General BB is posted oldest first. Preserve this year's reserved share
+        // before admitting a general collection for a later wage year.
+        if (earmarked>0n) break;
+      }
       const proof=income?clubProceeds(db,terms).find(p=>p.reference===income):null;
       if (income && !proof) return null;
       const offset=prior('',income),amount=minimum(balance,debt,proof?proof.limit-offset:balance);
@@ -132,6 +145,9 @@ export function wageCollector(db,rpc,market,statement,reconcile) {
     const block=await rpc.getLatestBlockhash('finalized'),rent=await rpc.getMinimumBalanceForRentExemption(0);
     const {tx,marker}=await collectionTransaction(terms,source,claim,block,rent);
     if (await rpc.getAccountInfo(marker,'finalized')) throw Error('Collection marker already exists. Recover the original journal.');
+    const fee=(await rpc.getFeeForMessage(tx.compileMessage(),'finalized')).value;
+    if (!Number.isSafeInteger(fee) || fee<0 || !Number.isSafeInteger(rent) || rent<=0 || !Number.isSafeInteger(fee+rent))
+      throw Error('A current collection cost in lamports is required.');
     tx.sign(signer);
     const signature=bs58.encode(tx.signature);
     const details={...claim,source,block,rent,bytes:tx.serialize().toString('base64')};
@@ -140,6 +156,10 @@ export function wageCollector(db,rpc,market,statement,reconcile) {
       const revised=quote(current,latest,mode,balance,claim.income);
       if (JSON.stringify(terms)!==JSON.stringify(current) || !revised || revised.sale!==claim.sale ||
           revised.amount!==claim.amount || revised.offset!==claim.offset) throw Error('Collection changed. Retry with current evidence.');
+      const cap=config().wageSettlement.collectionBudgetLamports?.[source];
+      const spent=db.prepare('SELECT COALESCE(SUM(lamports),0) AS total FROM wage_collection_costs WHERE signer=?').get(source).total;
+      if (!Number.isSafeInteger(cap) || cap-spent<fee+rent) throw Error('Collection exceeds the configured signer fee and rent budget.');
+      db.prepare('INSERT INTO wage_collection_costs VALUES(?,?,?)').run(signature,source,fee+rent);
       db.prepare('INSERT INTO wage_collection_pending VALUES(?,?,?)').run(club,signature,JSON.stringify(details));
     }});
     const next=pending(club);
