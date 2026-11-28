@@ -5,6 +5,7 @@ import { Connection } from '@solana/web3.js';
 import { loanNetwork } from './loan-review.js';
 import { loanAgreements, LoanError } from './loan-agreements.js';
 import { loanInbox } from './loan-inbox.js';
+import { loanTraining } from './loan-training.js';
 
 export function openLoanDesk(file, expectedDb) {
   const endpoint = process.env.BALLERZ_DEVNET_RPC || 'https://api.devnet.solana.com';
@@ -21,7 +22,7 @@ export function openLoanDesk(file, expectedDb) {
   config();
   const db = new DatabaseSync(filename);
   try {
-    return {...loanAgreements(db,new Connection(endpoint,'finalized'),config),inbox:loanInbox(db),
+    return {...loanAgreements(db,new Connection(endpoint,'finalized'),config),inbox:loanInbox(db),training:loanTraining(db,config),
       close:()=>db.close()};
   } catch (error) { db.close(); throw error; }
 }
@@ -32,19 +33,22 @@ export async function loanApi(request,desk) {
   const path=new URL(request.url).pathname;
   const match = /^\/api\/loans\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})(\/approve)?$/.exec(path);
   const inbox=path==='/api/loans/inbox' || path==='/api/loans/inbox/challenge';
-  if (!match && !inbox) return reply({error:'Unknown loan agreement.'},404);
+  const training=['/api/loans/training','/api/loans/training/challenge','/api/loans/training/order'].includes(path);
+  if (!match && !inbox && !training) return reply({error:'Unknown loan agreement.'},404);
   try {
     if (match && !match[2] && request.method==='GET') return reply(desk.get(match[1]));
-    if ((!inbox && !match[2]) || request.method!=='POST') return reply({error:'Unsupported method.'},405);
+    if ((!inbox && !training && !match[2]) || request.method!=='POST') return reply({error:'Unsupported method.'},405);
     if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json')
       return reply({error:'Expected a JSON approval.'},415);
     const body = await request.json().catch(()=>null);
-    if (inbox) {
+    if (inbox || training) {
       const origin=request.headers.get('origin');
       if (!origin || !URL.canParse(origin) || !['http:','https:'].includes(new URL(origin).protocol) ||
         new URL(origin).origin!==origin || new URL(origin).host!==request.headers.get('host'))
-        return reply({error:'Open the loan inbox on this matchday service.'},403);
+        return reply({error:'Open this page on the same matchday service.'},403);
+      if (training && path.endsWith('/order')) return reply(desk.training.submit(body?.order,body?.signature,origin));
       if (!body || typeof body.wallet!=='string') return reply({error:'Choose a manager wallet.'},400);
+      if (training) return reply(path.endsWith('/challenge') ? desk.training.challenge(body.wallet,origin) : desk.training.read(body,origin));
       return reply(path.endsWith('/challenge') ? desk.inbox.challenge(body.wallet,origin) : desk.inbox.list(body,origin));
     }
     if (!body || typeof body.wallet!=='string' || typeof body.signature!=='string' || Object.keys(body).length!==2)

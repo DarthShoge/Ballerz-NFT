@@ -5,13 +5,8 @@ import { inboxMessage } from '../public/inbox-message.js';
 import { LoanError } from './loan-agreements.js';
 import { clubs } from './football.js';
 
-export function loanInbox(db,clock=Date.now) {
+export function walletProof(message,clock=Date.now) {
   const pending=new Map();
-  db.exec(`CREATE INDEX IF NOT EXISTS parent_inbox ON loan_agreements(json_extract(terms,'$.ownerWallet'));
-    CREATE INDEX IF NOT EXISTS borrower_inbox ON loan_agreements(json_extract(terms,'$.borrowerWallet'));`);
-  const agreements=db.prepare(`SELECT id,terms,startAt,endAt,confirmedAt,parentSignature IS NOT NULL AS parentApproved,
-    borrowerSignature IS NOT NULL AS borrowerApproved FROM loan_agreements WHERE superseded=0 AND
-    (json_extract(terms,'$.ownerWallet')=? OR json_extract(terms,'$.borrowerWallet')=?) ORDER BY startAt DESC`);
   function challenge(wallet,origin) {
     let valid=false;
     if (typeof wallet==='string' && wallet.length<=44) {
@@ -26,13 +21,27 @@ export function loanInbox(db,clock=Date.now) {
     pending.set(ticket.nonce,{...ticket,wallet,origin});
     return ticket;
   }
-  function list({wallet,nonce,signature},origin) {
+  function verify({wallet,nonce,signature},origin) {
     const ticket=pending.get(nonce);
     if (!ticket || ticket.origin!==origin || ticket.wallet!==wallet || ticket.expiresAt<=clock() ||
       typeof signature!=='string' || !/^[A-Za-z0-9+/]{86}==$/.test(signature) ||
-      !ed25519.verify(Buffer.from(signature,'base64'),Buffer.from(inboxMessage(origin,wallet,ticket)),
-        new PublicKey(wallet).toBytes(),{zip215:false})) throw new LoanError('Verify this wallet again to open its inbox.',403);
+      !ed25519.verify(Buffer.from(signature,'base64'),Buffer.from(message(origin,wallet,ticket)),
+        new PublicKey(wallet).toBytes(),{zip215:false})) throw new LoanError('Verify this wallet again.',403);
     pending.delete(nonce);
+  }
+  return {challenge,verify};
+}
+
+export function loanInbox(db,clock=Date.now) {
+  const proof=walletProof(inboxMessage,clock);
+  db.exec(`CREATE INDEX IF NOT EXISTS parent_inbox ON loan_agreements(json_extract(terms,'$.ownerWallet'));
+    CREATE INDEX IF NOT EXISTS borrower_inbox ON loan_agreements(json_extract(terms,'$.borrowerWallet'));`);
+  const agreements=db.prepare(`SELECT id,terms,startAt,endAt,confirmedAt,parentSignature IS NOT NULL AS parentApproved,
+    borrowerSignature IS NOT NULL AS borrowerApproved FROM loan_agreements WHERE superseded=0 AND
+    (json_extract(terms,'$.ownerWallet')=? OR json_extract(terms,'$.borrowerWallet')=?) ORDER BY startAt DESC`);
+  function list(input,origin) {
+    proof.verify(input,origin);
+    const {wallet}=input;
     const now=clock();
     return agreements.all(wallet,wallet).map(row=>{
       const terms=JSON.parse(row.terms);
@@ -47,5 +56,5 @@ export function loanInbox(db,clock=Date.now) {
         role:parent?'Parent club':'Borrowing club',startAt:row.startAt,status};
     });
   }
-  return {challenge,list};
+  return {challenge:proof.challenge,list};
 }

@@ -8,6 +8,9 @@ import { openStore } from '../src/local-store.js';
 import { indexTransfers } from '../src/registration-index.js';
 import { GAME_YEAR_MS, GAME_WEEK_MS } from '../src/world-clock.js';
 import { buyerMessage } from '../public/buyer-message.js';
+import { loanTraining } from '../src/loan-training.js';
+import { trainingAccess,trainingOrder } from '../public/training-message.js';
+import { randomUUID } from 'node:crypto';
 
 // Use the same two settled grant sales as the financial journey. The first buyer
 // signs a loan before selling, and the borrower becomes the new permanent owner.
@@ -48,7 +51,18 @@ export async function verifyLoanResale(rpc,world,firstSale,receipt,parent,borrow
     assert.equal(resale.sportingReview.loans[0].parentWageBps,2500);
     const changedAt=second.blockTime*1000;
     assert.ok(changedAt>startAt && changedAt<endAt);
+    now=changedAt;
+    const training=loanTraining(db,()=>config,()=>now);
+    const origin='http://localhost',wallet=String(borrower.publicKey);
+    const sign=text=>Buffer.from(ed25519.sign(Buffer.from(text),borrower.secretKey.slice(0,32))).toString('base64');
+    const ticket=training.challenge(wallet,origin);
+    const before=training.read({wallet,nonce:ticket.nonce,signature:sign(trainingAccess(origin,wallet,ticket))},origin);
+    assert.ok(before.players[0].canBook);
+    const order={action:'book',id:randomUUID(),mint:terms.mint,player:terms.player,wallet,week:before.week,club:'northbank',
+      authority:before.players[0].authority,genesis:config.genesis,sponsor:config.sponsor,skill:'passing'};
+    assert.equal(training.submit(order,sign(trainingOrder(origin,order)),origin).status,'reserved');
     await index(resale);
+    assert.deepEqual(training.finish(order.id,'completed'),{status:'completed',weight:100});
     acknowledge(parent);
     acknowledge(borrower);
     now=endAt;
