@@ -6,6 +6,7 @@ import { reviewLoan } from './loan-review.js';
 import { clubWallets } from './club-wallets.js';
 import { sportingRegister } from './sporting-register.js';
 import { loanWages } from './loan-wages.js';
+import { buyerReviews,loanSaleBinding } from './buyer-review.js';
 
 export class LoanError extends Error {
   constructor(message, status = 409) { super(message); this.status = status; }
@@ -24,6 +25,7 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
   const find = db.prepare('SELECT * FROM loan_agreements WHERE id=?');
   const registration = sportingRegister(db,clock);
   const wages = loanWages(db);
+  const bindSale=loanSaleBinding(db,loadConfig()?.saleLedger);
   const wallets = clubWallets(db);
   const overlapping = db.prepare(`SELECT * FROM loan_agreements
     WHERE mint=? AND startAt < ? AND endAt > ? AND superseded=0`);
@@ -76,6 +78,7 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
     const fields = {...quote, borrowerWallet, sponsor:config.sponsor, bbMint:config.bbMint};
     return write(()=>{
       checkAuthority(fields,clock());
+      bindSale(fields);
       const rows = overlapping.all(quote.mint,quote.endAt,quote.startAt);
       for (const row of rows) {
         if (loanMessage({...fields,id:row.id}) === loanMessage(JSON.parse(row.terms))) return view(row);
@@ -110,6 +113,7 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
       if (row[column]) return view(row);
       const now=clock();
       checkAuthority(terms,now);
+      bindSale(terms);
       if (row.superseded) throw new LoanError('A newer agreement replaced these terms.');
       if (evidence.checkedSlot < row.checkedSlot) throw new LoanError('Newer title evidence arrived. Retry this approval.');
       wallets.bind(wallet,column==='parentSignature' ? terms.parent : terms.borrower);
@@ -121,5 +125,6 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
       return view(get(id));
     });
   }
-  return {propose, approve, get:id=>view(get(id)), publishRate:input=>write(()=>wages.publish(loadConfig(),input))};
+  return {propose, approve, get:id=>view(get(id)), buyers:buyerReviews(db,loadConfig,clock,bindSale),
+    publishRate:input=>write(()=>wages.publish(loadConfig(),input))};
 }

@@ -15,12 +15,14 @@ export function openLoanDesk(file, expectedDb) {
   function config() {
     const settings = read();
     if (resolve(dirname(file),settings.fixtureDb) !== filename) throw new Error('The configured sporting database changed.');
-    return {...settings,genesis:loanNetwork(endpoint,settings.validatorGenesis)};
+    return {...settings,saleLedger:settings.saleLedger && resolve(dirname(file),settings.saleLedger),
+      genesis:loanNetwork(endpoint,settings.validatorGenesis)};
   }
   config();
   const db = new DatabaseSync(filename);
   try {
-    return {...loanAgreements(db,new Connection(endpoint,'finalized'),config),inbox:loanInbox(db),close:()=>db.close()};
+    return {...loanAgreements(db,new Connection(endpoint,'finalized'),config),inbox:loanInbox(db),
+      close:()=>db.close()};
   } catch (error) { db.close(); throw error; }
 }
 

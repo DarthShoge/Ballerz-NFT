@@ -41,7 +41,7 @@ test('underfunded wages roll back the fee and title; an expired signed purchase 
   const bbMint=mint(buyer,100000n,30000n), playerMint=mint(seller,1n,0n);
   const treasury=Keypair.generate().publicKey;
   const listing={sponsor,seller,playerMint,bbMint,version:version.publicKey,blockhash:svm.latestBlockhash(),
-    lastValidBlockHeight:150,price:100000,wages:30000,
+    lastValidBlockHeight:150,price:100000,wages:30000,disclosures:'ab'.repeat(32),
     grant:{claim:70000,relationship:'independent',buyer:buyer.toBase58(),treasury:treasury.toBase58(),revision:0}};
   send(publishListing(listing,rent(MULTISIG_SIZE)),home,version);
   const replacement = Keypair.generate();
