@@ -43,6 +43,8 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     await page.getByRole('button',{name:'Open my inbox'}).click();
     await page.getByRole('link',{name:/Awaiting your approval/}).click();
     assert.equal(page.url(),url);
+    // Reopening a private invitation must reach the same review directly.
+    await page.goto(url);
     await page.getByRole('button',{name:'Connect Solflare'}).click();
     await page.getByText('Connected wallet · '+manager.publicKey).waitFor();
     return page;
