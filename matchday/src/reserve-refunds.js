@@ -26,7 +26,7 @@ function earned(db,terms,row,until,year) {
   let elapsed=0n,loan=0n,last=row.effectiveAt;
   if (until<last) throw Error('Reconcile inconsistent purchase dates before releasing reserves.');
   const rate=db.prepare('SELECT annualBB,startAt FROM player_wage_rates WHERE mint=? AND year=?').get(row.mint,year);
-  if (until===last) return {gross:0n,loan:0n};
+  if (until===last) return {gross:0n,loan:0n,ordinary:0n};
   if (!rate || rate.startAt!==terms.epoch+(year-1)*GAME_YEAR_MS) return null;
   const loans=db.prepare(`SELECT startAt,endAt,terms FROM loan_agreements WHERE mint=? AND confirmedAt IS NOT NULL
     AND endAt>? AND startAt<? ORDER BY startAt`).all(row.mint,last,until);
@@ -41,8 +41,9 @@ function earned(db,terms,row,until,year) {
     loan+=duration*BigInt(bps);
     last=end;
   }
-  const annual=BigInt(rate.annualBB), units=(BigInt(until-row.effectiveAt)-elapsed)*10000n+loan;
-  return {gross:(units*annual+denominator-1n)/denominator,loan:loan*annual/denominator};
+  const annual=BigInt(rate.annualBB), ordinary=(BigInt(until-row.effectiveAt)-elapsed)*10000n*annual;
+  const roundUp=units=>(units+denominator-1n)/denominator;
+  return {gross:roundUp(ordinary+loan*annual),loan:loan*annual/denominator,ordinary:roundUp(ordinary)};
 }
 
 export function refundPositions(db,terms,closing) {
@@ -78,7 +79,8 @@ export function refundPositions(db,terms,closing) {
       const loanCap=min(inTreasury+inEscrow,exposure.loan),applied=min(inTreasury,loanCap);
       const outstanding=min(loanCap-applied,debt.get(year));
       debt.set(year,debt.get(year)-outstanding);
-      retain=min(deposit,exposure.gross-exposure.loan+applied+outstanding);
+      // The year-end wage ledger carries fractional loan BB into the next year.
+      retain=min(deposit,exposure.ordinary+applied+outstanding);
     }
     const refundable=splitReserveRefund(deposit,bursary,deposit-retain);
     const surplus=inEscrow+inTreasury>retain?inEscrow+inTreasury-retain:0n;

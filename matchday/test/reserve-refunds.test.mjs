@@ -68,4 +68,12 @@ test('returns follow signed sources, protect earned wages and reconcile later tr
     {source:'bursary',funded:'60',remitted:'12',refunded:'36'}]);
   assert.deepEqual(reserveSourceStatement(db,'north',0,GAME_YEAR_MS)[0].sources,
     [{source:'club',funded:'60',remitted:'0',refunded:'0'}]);
+  db.exec("DELETE FROM wage_refunds; DELETE FROM wage_collections; UPDATE loan_agreements SET startAt=1");
+  db.prepare("UPDATE player_wage_rates SET annualBB=?").run(GAME_YEAR_MS/2);
+  // The signed 25% share earned 12.5 BB. Twelve whole BB can be collected
+  // this year, while the club ledger carries the fraction into the next year.
+  closing.years=[{year:1,arrears:'12'}];
+  assert.equal(claim().proof.pockets.escrow,88n);
+  closing.years=[{year:1,arrears:'0'}];
+  assert.equal(claim().proof.pockets.escrow,100n);
 });
