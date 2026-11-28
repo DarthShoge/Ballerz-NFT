@@ -11,6 +11,8 @@ import { buyerMessage } from '../public/buyer-message.js';
 import { loanTraining } from '../src/loan-training.js';
 import { trainingAccess,trainingOrder } from '../public/training-message.js';
 import { randomUUID } from 'node:crypto';
+import { clubLoanWages } from '../src/club-loan-wages.js';
+import { wageStatementMessage } from '../public/wage-statement-message.js';
 
 // Use the same two settled grant sales as the financial journey. The first buyer
 // signs a loan before selling, and the borrower becomes the new permanent owner.
@@ -72,6 +74,10 @@ export async function verifyLoanResale(rpc,world,firstSale,receipt,parent,borrow
     assert.equal(units.eastport,sellerUnits);
     assert.equal(units.northbank,BigInt(endAt-startAt)*52000n*10000n-sellerUnits);
     assert.equal(report.denominator,String(BigInt(GAME_YEAR_MS)*10000n));
+    const statements=clubLoanWages(db,()=>config,()=>now);
+    const access=statements.challenge(wallet,origin);
+    const statement=statements.read({wallet,nonce:access.nonce,signature:sign(wageStatementMessage(origin,wallet,access))},origin);
+    assert.equal(BigInt(statement.total.wholeBB)*BigInt(statement.denominator)+BigInt(statement.total.remainder),units.northbank);
     await index(resale);
     assert.deepEqual(desk.get(terms.id).wages,report);
     return {resale,second};

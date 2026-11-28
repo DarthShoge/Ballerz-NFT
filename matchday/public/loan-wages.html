@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Club loan wages · Ballerz</title><link rel="stylesheet" href="/matchday.css"><link rel="stylesheet" href="/listings.css"></head>
+<body><header class="mast"><div class="wrap mast-inner"><a class="brand" href="/">Ballerz<span>.</span></a>
+<div class="mast-rule"></div><nav class="club-nav" aria-label="Club management"><a href="/">Match centre</a><a href="/my-loans.html">My loans</a></nav></div></header>
+<main class="desk"><h1>Club loan wages</h1><p>Review your club’s accrued share across confirmed loans. Opening a statement is free.</p>
+<form id="lookup"><label for="year">Wage year (leave blank for current)</label><input id="year" type="number" min="1" step="1">
+<button id="open">Open statement with Solflare</button></form>
+<p role="status" id="notice"></p><section id="report" hidden><h2 id="title"></h2><p id="cutoff"></p><p id="total"></p>
+<ul id="lines"></ul><p>Amounts reflect finalized transfers indexed so far. Settlement is separate.</p>
+<button id="close">Close statement</button></section></main>
+<script src="/vendor/solana.js"></script><script type="module" src="/loan-wages.js"></script></body></html>
