@@ -21,7 +21,8 @@ el('lookup').onsubmit=async event=>{
   try {
     const signer=await connectLoanWallet();if (attempt!==version) return;
     unwatch=signer.watch(close);
-    const wallet=signer.address,ticket=await post('/challenge',{wallet});if (attempt!==version) return;
+    const wallet=signer.address,ticket=await post('/challenge',{wallet,...(chosen && {year:Number(chosen)})});if (attempt!==version) return;
+    if (!Number.isSafeInteger(ticket.scope) || ticket.scope<1 || (chosen && ticket.scope!==Number(chosen))) throw Error('Wage year changed. Reopen the statement.');
     const bytes=await signer.sign(new TextEncoder().encode(wageStatementMessage(location.origin,wallet,ticket)));if (attempt!==version) return;
     const result=await post('',{wallet,nonce:ticket.nonce,signature:btoa(String.fromCharCode(...bytes)),...(chosen && {year:Number(chosen)})});
     if (attempt!==version) return;

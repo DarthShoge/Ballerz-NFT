@@ -23,14 +23,18 @@ export function clubLoanWages(db,loadConfig,clock=Date.now) {
     const club=config.wallets?.[wallet];
     return club && config.loanManagers?.[club]===wallet && wallet!==config.sponsor && wallets.matches(wallet,club)?club:null;
   }
-  function statement(wallet,requested) {
-    const config=loadConfig(),club=manager(config,wallet),now=clock();
-    if (!club) throw new LoanError('Use the current manager wallet for this club.',403);
+  function calendar(requested,now) {
     const epoch=db.prepare('SELECT start_at FROM world_clock WHERE id=1').get()?.start_at;
     if (epoch===undefined || now<epoch) throw new LoanError('The shared wage calendar has not started.');
     const currentYear=1+Math.floor((now-epoch)/GAME_YEAR_MS),year=requested===undefined?currentYear:requested;
     if (!Number.isSafeInteger(year) || year<1 || year>currentYear) throw new LoanError('Choose a wage year that has started.',400);
     const start=epoch+(year-1)*GAME_YEAR_MS,end=start+GAME_YEAR_MS,asOf=Math.min(now,end);
+    return {year,currentYear,start,end,asOf};
+  }
+  function statement(club,requested,now=clock()) {
+    const config=loadConfig(),{year,currentYear,start,end,asOf}=calendar(requested,now);
+    if (db.prepare('SELECT 1 FROM sporting_players WHERE genesis<>? OR bb<>? OR sponsor<>? LIMIT 1')
+      .get(config.genesis,config.bbMint,config.sponsor)) throw new LoanError('The sporting register belongs to a different wage market.');
     const lines=[];
     let total=0n,complete=true;
     for (const row of loans.all(year,end,start,config.genesis,config.bbMint,config.sponsor)) {
@@ -57,12 +61,18 @@ export function clubLoanWages(db,loadConfig,clock=Date.now) {
     }
     return {club,year,currentYear,start,end,asOf,denominator:String(denominator),total:complete?amount(total):null,lines};
   }
-  return {challenge(wallet,origin) {
-    return proof.challenge(wallet,origin,Boolean(manager(loadConfig(),wallet)));
+  return {statement,challenge(wallet,origin,requested) {
+    const {year}=calendar(requested,clock());
+    return proof.challenge(wallet,origin,Boolean(manager(loadConfig(),wallet)),year);
   },read(input,origin) {
-    proof.verify(input,origin);
+    const year=proof.verify(input,origin);
+    if (input.year!==undefined && input.year!==year) throw new LoanError('Sign for the selected wage year.',403);
     db.exec('BEGIN DEFERRED');
-    try {const result=statement(input.wallet,input.year);db.exec('COMMIT');return result;}
+    try {
+      const club=manager(loadConfig(),input.wallet);
+      if (!club) throw new LoanError('Use the current manager wallet for this club.',403);
+      const result=statement(club,year);db.exec('COMMIT');return result;
+    }
     catch(error) {db.exec('ROLLBACK');throw error;}
   }};
 }

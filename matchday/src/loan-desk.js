@@ -50,7 +50,7 @@ export async function loanApi(request,desk) {
         return reply({error:'Open this page on the same matchday service.'},403);
       if (training && path.endsWith('/order')) return reply(desk.training.submit(body?.order,body?.signature,origin));
       if (!body || typeof body.wallet!=='string') return reply({error:'Choose a manager wallet.'},400);
-      if (statements) return reply(path.endsWith('/challenge') ? desk.statements.challenge(body.wallet,origin) : desk.statements.read(body,origin));
+      if (statements) return reply(path.endsWith('/challenge') ? desk.statements.challenge(body.wallet,origin,body.year) : desk.statements.read(body,origin));
       if (training) return reply(path.endsWith('/challenge') ? desk.training.challenge(body.wallet,origin) : desk.training.read(body,origin));
       return reply(path.endsWith('/challenge') ? desk.inbox.challenge(body.wallet,origin) : desk.inbox.list(body,origin));
     }
