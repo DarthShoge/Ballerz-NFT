@@ -69,5 +69,6 @@ export async function collectionJourney(rpc,payer,seller,world,assets,receipt) {
     assert.equal((await rpc.getTokenAccountBalance(ata(treasury),'finalized')).value.amount,String(debt));
     assert.equal((await rpc.getTokenAccountBalance(ata(payroll.publicKey),'finalized')).value.amount,'1');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM wage_collections').get().n,3);
+    return config;
   } finally {db.close();}
 }

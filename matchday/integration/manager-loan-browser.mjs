@@ -106,5 +106,12 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     await borrower.getByText('Total accrued · 0 test BB').waitFor();
     await borrower.getByText('This wage year is still open.').waitFor();
     await borrower.getByText(/Jude Kavan.*scheduled/).waitFor();
+    assert.equal(await borrower.getByRole('heading',{name:'Purchase reserve funding'}).isVisible(),false);
+    await parent.getByRole('link',{name:'My loans'}).click();
+    await parent.getByRole('link',{name:'Club loan wages'}).click();
+    await parent.getByRole('button',{name:'Open statement with Solflare'}).click();
+    await parent.getByText('Jude Kavan · Club funds · Funded 30,000 test BB · Remitted 0 test BB · Refunded 0 test BB').waitFor();
+    await parent.getByRole('button',{name:'Close statement'}).click();
+    assert.equal(await parent.locator('#sources li').count(),0);
   } finally {await parent.close();await borrower.close();}
 }

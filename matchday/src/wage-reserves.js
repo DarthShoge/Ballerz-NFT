@@ -2,6 +2,7 @@ import { GAME_YEAR_MS } from './world-clock.js';
 import { Transaction } from '@solana/web3.js';
 import { decodeTerms } from './registration-index.js';
 import { grantSettlement, verifyTransfer } from './player-transfer.js';
+import { refundTotals } from './reserve-refunds.js';
 
 export function clubReserves(db,terms,year,asOf,statement) {
   const start = terms.epoch+(year-1)*GAME_YEAR_MS, end=start+GAME_YEAR_MS;
@@ -16,8 +17,9 @@ export function clubReserves(db,terms,year,asOf,statement) {
     const sale=JSON.parse(row.terms);
     const share=statement(terms.club,year,asOf,{mint:row.mint,startAt:row.effectiveAt,endAt:row.soldAt??end}).total;
     if (!share) throw Error('Publish the wage rate for the reserved player.');
-    const deposited=BigInt(sale.listing.wages), owed=BigInt(share.wholeBB);
-    return {reference:row.reference,year,sale,limit:deposited<owed?deposited:owed};
+    const returned=refundTotals(db,row.reference);
+    const deposited=BigInt(sale.listing.wages)-returned.escrow-returned.treasury, owed=BigInt(share.wholeBB);
+    return {reference:row.reference,year,sale,treasuryReturned:returned.treasury,limit:deposited<owed?deposited:owed};
   });
 }
 
@@ -40,6 +42,11 @@ export async function verifyFundingSale(rpc,reserve,terms) {
       String(listing.bbMint)!==terms.mint) throw Error('Unverified purchase wage reserve.');
   const signed=Transaction.populate(record.transaction.message,record.transaction.signatures);
   const proof=verifyTransfer(record,signed,listing,buyer);
+  if (reserve.slot!==undefined) {
+    const timestamp=proof.blockTime??await rpc.getBlockTime(proof.slot);
+    if (proof.slot!==reserve.slot || !Number.isSafeInteger(timestamp) || timestamp*1000!==reserve.effectiveAt)
+      throw Error('Indexed purchase checkpoint differs from finalized evidence.');
+  }
   if (BigInt(proof.wageReserve.after)-BigInt(proof.wageReserve.before)!==BigInt(listing.wages))
     throw Error('Purchase reserve funding differs from the registered sale.');
 }
@@ -50,5 +57,5 @@ export function remainingReserveCustody(db,terms) {
     AND json_type(s.terms,'$.listing.wages')='integer'`).all(terms.genesis,terms.mint,terms.sponsor);
   const spent=db.prepare("SELECT amount FROM wage_collections WHERE sale<>''").all();
   const sum=rows=>rows.reduce((total,row)=>total+BigInt(row.amount),0n);
-  return sum(deposits)-sum(spent);
+  return sum(deposits)-sum(spent)-sum(db.prepare("SELECT amount FROM wage_refunds WHERE pocket='escrow'").all());
 }

@@ -7,7 +7,8 @@ const money=row=>BigInt(row.wholeBB).toLocaleString()+' test BB'+(row.remainder=
 let version=0,unwatch;
 function close() {
   version++;unwatch?.();unwatch=undefined;
-  for (const id of ['title','cutoff','total','lines','notice','settlement']) el(id).replaceChildren();
+  for (const id of ['title','cutoff','total','lines','notice','settlement','sources']) el(id).replaceChildren();
+  el('funding').hidden=true;
   el('report').hidden=true;el('open').disabled=false;
 }
 async function post(path,data) {
@@ -28,6 +29,16 @@ el('lookup').onsubmit=async event=>{
     if (attempt!==version) return;
     const club=({northbank:'Northbank Athletic',eastport:'Eastport Rovers'})[result.club] ?? result.club;
     el('title').textContent=club+' · Wage year '+result.year;
+    for (const reserve of result.reserves) {
+      for (const row of reserve.sources) {
+        const li=document.createElement('li');
+        const bb=value=>BigInt(value).toLocaleString()+' test BB';
+        li.textContent=reserve.name+' · '+(row.source==='club'?'Club funds':'Wage bursary')+' · Funded '+bb(row.funded)+
+          ' · Remitted '+bb(row.remitted)+' · Refunded '+bb(row.refunded);
+        el('sources').append(li);
+      }
+    }
+    el('funding').hidden=!result.reserves.length;
     el('cutoff').textContent='Through '+time(result.asOf)+' · Year ends '+time(result.end);
     el('total').textContent=result.total?'Total accrued · '+money(result.total):'Total awaiting a published wage rate.';
     const settled=result.settlement;

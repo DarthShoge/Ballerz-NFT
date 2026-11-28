@@ -9,6 +9,7 @@ test('funding follows each finalized purchase, custody period and net sale after
   db.exec(`CREATE TABLE sporting_players(player,mint,genesis,bb,sponsor);
     CREATE TABLE sporting_sales(player,reference,terms,seller,buyer,status,effectiveAt,slot,position);
     CREATE TABLE wage_collections(sale,amount);
+    CREATE TABLE wage_refunds(sale,kind,pocket,amount);
     INSERT INTO sporting_players VALUES('winger','W','pilot','BB','custody');`);
   const terms={genesis:'pilot',mint:'BB',sponsor:'custody',club:'eastport',epoch:1000};
   const insert=(id,time,status,seller,buyer,wages,claim)=>db.prepare('INSERT INTO sporting_sales VALUES(?,?,?,?,?,?,?,?,?)')

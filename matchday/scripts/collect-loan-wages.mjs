@@ -4,8 +4,8 @@ import { Keypair } from '@solana/web3.js';
 import { openLoanDesk } from '../src/loan-desk.js';
 
 const [config,club,source,keyFile,watch,...extra]=process.argv.slice(2);
-if (!keyFile || !['income','proceeds','reserve'].includes(source) || (watch && watch!=='--watch') || extra.length)
-  throw Error('Use collect-loan-wages.mjs operator.json CLUB income|proceeds|reserve SOURCE_KEY.json [--watch].');
+if (!keyFile || !['income','proceeds','reserve','refund-escrow','refund-treasury'].includes(source) || (watch && watch!=='--watch') || extra.length)
+  throw Error('Use collect-loan-wages.mjs operator.json CLUB income|proceeds|reserve|refund-escrow|refund-treasury SOURCE_KEY.json [--watch].');
 const signer=Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyFile,'utf8'))));
 const desk=openLoanDesk(config);
 try {

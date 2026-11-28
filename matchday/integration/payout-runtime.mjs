@@ -5,7 +5,7 @@ import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   AccountLayout, ASSOCIATED_TOKEN_PROGRAM_ID, AuthorityType, MINT_SIZE, TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction, createInitializeMint2Instruction,
-  createMintToInstruction, createSetAuthorityInstruction
+  createMintToInstruction, createSetAuthorityInstruction, getAssociatedTokenAddressSync
 } from '@solana/spl-token';
 import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
 import { appearanceBatch, treasuryAddresses } from '../src/devnet-settlement.js';
@@ -115,4 +115,18 @@ test('club payroll collections preserve balances on duplicate, underfunded and c
   assert.ok(!(send(new Transaction().add(rotate),treasury) instanceof FailedTransactionMetadata));
   assert.ok(pay(10n) instanceof FailedTransactionMetadata);
   assert.deepEqual(balances(),[35n,45n]);
+  const recipient=Keypair.generate().publicKey, destination=getAssociatedTokenAddressSync(mint.publicKey,recipient);
+  const refund={sale:'original-sale',pocket:'escrow',refund:'bursary',recipient:String(recipient),
+    offset:'0',holder:String(source.publicKey),year:1};
+  const build=amount=>collectionTransaction({...terms,sponsor:String(source.publicKey)},String(source.publicKey),
+    {...refund,amount},{blockhash:svm.latestBlockhash(),lastValidBlockHeight:60},Number(svm.minimumBalanceForRentExemption(0n)));
+  const over=await build('36');
+  assert.ok(send(over.tx) instanceof FailedTransactionMetadata);
+  assert.equal(svm.getAccount(destination),null);
+  assert.equal(svm.getAccount(over.marker),null);
+  const valid=await build('20');
+  assert.ok(!(send(valid.tx) instanceof FailedTransactionMetadata));
+  assert.ok(send(valid.tx) instanceof FailedTransactionMetadata);
+  assert.deepEqual(balances(),[15n,45n]);
+  assert.equal(AccountLayout.decode(svm.getAccount(destination).data).amount,20n);
 });

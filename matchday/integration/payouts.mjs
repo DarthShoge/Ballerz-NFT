@@ -44,7 +44,7 @@ async function playFixture(store, accounts) {
   return {id, homeKey:key};
 }
 
-test('matchday payouts against a fresh Solana validator', {timeout:720_000}, async t => {
+test('matchday payouts against a fresh Solana validator', {timeout:780_000}, async t => {
   const world = mkdtempSync(join(tmpdir(), 'ballerz-payouts-'));
   const payer = Keypair.generate();
   const clubKeys = [Keypair.generate(), Keypair.generate()];

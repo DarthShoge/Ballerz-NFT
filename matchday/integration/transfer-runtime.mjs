@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import { AccountLayout, AuthorityType, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE, MULTISIG_SIZE,
-  TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, createInitializeMint2Instruction,
+  TOKEN_PROGRAM_ID, createApproveCheckedInstruction, createAssociatedTokenAccountIdempotentInstruction, createInitializeMint2Instruction,
   createMintToInstruction, createSetAuthorityInstruction, createTransferCheckedInstruction,
   getAssociatedTokenAddressSync as ata } from '@solana/spl-token';
 import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
@@ -90,4 +90,30 @@ test('underfunded wages roll back the fee and title; an expired signed purchase 
   assert.equal(amount(playerMint,buyer),1n);
   assert.ok(svm.sendTransaction(sale) instanceof FailedTransactionMetadata);
   assert.equal(amount(bbMint,treasury),70000n);
+
+  const bursary=Keypair.generate();
+  const restricted=ata(bbMint,bursary.publicKey);
+  const allowance=bb=>createApproveCheckedInstruction(restricted,bbMint,sponsor,bursary.publicKey,bb,0);
+  send(new Transaction().add(createAssociatedTokenAccountIdempotentInstruction(sponsor,restricted,bursary.publicKey,bbMint),
+    createTransferCheckedInstruction(ata(bbMint,sponsor),bbMint,restricted,sponsor,10000n,0),allowance(9999n)),bursary);
+  const mixed={...listing,seller:buyer,price:20000,wages:15000,grant:{...listing.grant,revision:1,buyer:String(seller),
+    claim:0,wageBursary:{owner:String(bursary.publicKey),bb:10000}}};
+  function prepareMixed() {
+    svm.expireBlockhash();
+    const v=Keypair.generate();
+    mixed.version=v.publicKey;mixed.blockhash=svm.latestBlockhash();
+    send(publishListing(mixed,rent(MULTISIG_SIZE)),away,v);
+    const tx=purchaseListing(mixed,seller);
+    tx.sign(operator,away,home);
+    return tx;
+  }
+  const balances=()=>[amount(bbMint,seller),amount(bbMint,buyer),amount(bbMint,sponsor),
+    amount(bbMint,bursary.publicKey),amount(playerMint,buyer),amount(playerMint,seller)];
+  const before=balances();
+  assert.ok(svm.sendTransaction(prepareMixed()) instanceof FailedTransactionMetadata);
+  assert.deepEqual(balances(),before);
+  send(new Transaction().add(allowance(10000n)),bursary);
+  const settled=svm.sendTransaction(prepareMixed());
+  assert.ok(!(settled instanceof FailedTransactionMetadata),settled.toString());
+  assert.deepEqual(balances(),[5000n,20000n,35000n,0n,0n,1n]);
 });

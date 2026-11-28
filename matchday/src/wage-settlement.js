@@ -20,6 +20,10 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     CREATE TABLE IF NOT EXISTS wage_manual_intents (message TEXT PRIMARY KEY, club TEXT NOT NULL,
       firstSlot INTEGER NOT NULL, lastHeight INTEGER NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS wage_collection_costs (signature TEXT PRIMARY KEY, signer TEXT NOT NULL, lamports INTEGER NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS wage_refunds (signature TEXT PRIMARY KEY,club TEXT NOT NULL,sale TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('club','bursary')), pocket TEXT NOT NULL CHECK(pocket IN ('escrow','treasury')),
+      recipient TEXT NOT NULL,amount TEXT NOT NULL,slot INTEGER NOT NULL) STRICT;
+    CREATE INDEX IF NOT EXISTS wage_refunds_sale ON wage_refunds(sale);
     CREATE TABLE IF NOT EXISTS wage_collections (signature TEXT PRIMARY KEY, club TEXT NOT NULL, sale TEXT NOT NULL,
       income TEXT NOT NULL, year INTEGER NOT NULL, amount TEXT NOT NULL, slot INTEGER NOT NULL) STRICT;`);
   function market(club) {
@@ -31,6 +35,7 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     if (db.prepare(`WITH payroll AS (SELECT value FROM json_each(?))
       SELECT 1 FROM sporting_wallets WHERE wallet IN payroll UNION ALL
       SELECT 1 FROM sporting_sales WHERE json_extract(terms,'$.listing.grant.treasury') IN payroll
+        OR json_extract(terms,'$.listing.grant.wageBursary.owner') IN payroll
         OR json_extract(terms,'$.listing.seller') IN payroll OR json_extract(terms,'$.buyer') IN payroll LIMIT 1`).get(addresses) ||
       (db.prepare("SELECT 1 FROM pragma_database_list WHERE name='resale'").get() &&
         db.prepare('SELECT 1 FROM resale.grant_market WHERE treasury IN (SELECT value FROM json_each(?)) LIMIT 1').get(addresses)))
@@ -91,10 +96,13 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
       pinMarket(club,binding);
       const pending=db.prepare('SELECT * FROM wage_collection_pending WHERE club=?').get(club);
       if (verified && pending?.signature===verified.signature) {
-        const {sale,income,year,amount}=JSON.parse(pending.details);
-        db.prepare('INSERT INTO wage_collections VALUES(?,?,?,?,?,?,?)').run(verified.signature,club,sale,income,year,amount,verified.slot);
+        const {sale,income,year,amount,refund,pocket,recipient}=JSON.parse(pending.details);
+        if (refund) db.prepare('INSERT INTO wage_refunds VALUES(?,?,?,?,?,?,?,?)')
+          .run(verified.signature,club,sale,refund,pocket,recipient,amount,verified.slot);
+        else db.prepare('INSERT INTO wage_collections VALUES(?,?,?,?,?,?,?)').run(verified.signature,club,sale,income,year,amount,verified.slot);
         db.prepare('DELETE FROM wage_collection_pending WHERE signature=?').run(verified.signature);
-      } else if (verified && !db.prepare('SELECT 1 FROM wage_collections WHERE signature=? AND club=?').get(verified.signature,club)) {
+      } else if (verified && !db.prepare(`SELECT 1 FROM wage_collections WHERE signature=? AND club=?
+        UNION ALL SELECT 1 FROM wage_refunds WHERE signature=? AND club=?`).get(verified.signature,club,verified.signature,club)) {
         throw Error('Automatic payment differs from the recorded collection.');
       }
       if (pending && receipt) throw Error('Recover the pending collection before importing a manual payment.');
@@ -131,7 +139,7 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
         const payments=db.prepare("SELECT sale,amount FROM wage_collections WHERE club=? AND year=? AND sale<>''").all(club,year);
         if (payments.length) {
           for (const reserve of clubReserves(db,terms,year,asOf,statement)) {
-            const remitted=payments.filter(p=>p.sale===reserve.reference).reduce((sum,p)=>sum+BigInt(p.amount),0n);
+            const remitted=payments.filter(p=>p.sale===reserve.reference).reduce((sum,p)=>sum+BigInt(p.amount),0n)-reserve.treasuryReturned;
             reserved+=remitted<reserve.limit?remitted:reserve.limit;
           }
         }

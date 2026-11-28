@@ -11,6 +11,7 @@ export function decodeTerms({listing,buyer}) {
   if (listing.grant) {
     const {revision,claim,relationship,treasury,buyer}=listing.grant;
     decoded.grant={revision,claim,relationship,treasury,buyer};
+    if (listing.grant.wageBursary) decoded.grant.wageBursary=listing.grant.wageBursary;
   }
   for (const field of ['playerMint','bbMint','sponsor','seller','version']) decoded[field]=new PublicKey(listing[field]);
   return {listing:decoded,buyer:new PublicKey(buyer)};
@@ -22,6 +23,8 @@ function observe(register,config,journal) {
   const {listing,buyer}=decodeTerms(journal);
   const mint=listing.playerMint.toBase58(), bb=listing.bbMint.toBase58(), sponsor=listing.sponsor.toBase58();
   const player=config.players[mint], seller=config.wallets[listing.seller.toBase58()], destination=config.wallets[buyer.toBase58()];
+  if (listing.grant?.wageBursary && config.wallets[listing.grant.wageBursary.owner])
+    throw Error('Restricted wage funding must use a separate wallet.');
   if (!clubs.some(c=>c.squad.some(p=>p.id===player)) || bb!==config.bbMint || sponsor!==config.sponsor ||
       !clubs.some(c=>c.id===seller) || !clubs.some(c=>c.id===destination) || seller===destination)
     throw new Error('Unknown sporting player, currency, sponsor or club wallet.');
