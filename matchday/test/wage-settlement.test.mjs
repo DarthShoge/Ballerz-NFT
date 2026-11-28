@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import { wageSettlement } from '../src/wage-settlement.js';
 import { GAME_YEAR_MS } from '../src/world-clock.js';
 
@@ -37,6 +37,21 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
   config.wageSettlement.treasury=treasury;
   rpc.getLatestBlockhash=async()=>({blockhash:wallet(),lastValidBlockHeight:100});
   assert.ok((await ledger.prepare('eastport','1')).unsignedTransaction);
+  const collector={publicKey:new PublicKey(config.wageSettlement.payroll.eastport)};
+  rpc.getEpochInfo=async()=>({blockHeight:100,absoluteSlot:500});
+  assert.equal((await ledger.collect('eastport','income',collector)).status,'awaiting manual payment');
+  rpc.getEpochInfo=async()=>({blockHeight:101,absoluteSlot:501});
+  rpc.getFirstAvailableBlock=async()=>slot+1;
+  await assert.rejects(ledger.collect('eastport','income',collector),/Restore finalized history/);
+  rpc.getFirstAvailableBlock=async()=>slot;
+  const pages=[];
+  rpc.getSignaturesForAddress=async(key,{before,minContextSlot})=>{
+    assert.equal(minContextSlot,501);pages.push(before);
+    return before?[]:[{slot,signature:'previous-failed-payment',err:{}}];
+  };
+  assert.equal((await ledger.collect('eastport','income',collector)).status,'no arrears');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM wage_manual_intents').get().n,0);
+  assert.deepEqual(pages,[undefined,'previous-failed-payment']);
   config.wageSettlement.treasury=wallet();
   await assert.rejects(reconcile(),/registered payroll market changed/);
   config.wageSettlement.treasury=treasury;

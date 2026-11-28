@@ -44,7 +44,7 @@ async function playFixture(store, accounts) {
   return {id, homeKey:key};
 }
 
-test('matchday payouts against a fresh Solana validator', {timeout:540_000}, async t => {
+test('matchday payouts against a fresh Solana validator', {timeout:720_000}, async t => {
   const world = mkdtempSync(join(tmpdir(), 'ballerz-payouts-'));
   const payer = Keypair.generate();
   const clubKeys = [Keypair.generate(), Keypair.generate()];
@@ -186,8 +186,8 @@ test('matchday payouts against a fresh Solana validator', {timeout:540_000}, asy
   });
 
   const [seller,buyer] = clubKeys;
-  await t.test('grant-funded sales reconcile independent losses, connected carry and resale once',async()=>{
-    await grantSaleJourney(rpc,payer,world);
+  await t.test('grant-funded sales reconcile independent losses, connected carry and resale once',async subtest=>{
+    await grantSaleJourney(rpc,payer,world,subtest);
   });
   await t.test('finalized payroll receipts clear only their club arrears and survive restart and replay',async()=>{
     await wagePayrollJourney(rpc,payer,world);

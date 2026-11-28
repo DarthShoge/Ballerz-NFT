@@ -50,7 +50,11 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     },{address:String(manager.publicKey),role});
     await page.goto(origin);
     await page.getByRole('link',{name:'Loans',exact:true}).click();
+    const inbox=page.waitForResponse(response=>response.url()===origin+'/api/loans/inbox' && response.request().method()==='POST');
     await page.getByRole('button',{name:'Open my inbox'}).click();
+    const response=await inbox;
+    assert.equal(response.status(),200,'Manager inbox proof failed for '+role);
+    assert.ok((await response.json()).some(row=>row.id===agreement.terms.id && row.status==='Awaiting your approval'));
     await page.getByRole('link',{name:/Awaiting your approval/}).click();
     assert.equal(page.url(),url);
     // Reopening a private invitation must reach the same review directly.
