@@ -12,10 +12,12 @@ import { playDueFixtures } from '../src/fixtures.js';
 import { openStore } from '../src/local-store.js';
 import { approveFixture } from '../src/fixture-appearance.js';
 import { treasuryAddresses } from '../src/devnet-settlement.js';
+import { buyerMessage } from '../public/buyer-message.js';
+import { ed25519 } from '@noble/curves/ed25519';
 
 export async function registrationJourney(rpc,world,trial,journal,settle,managers) {
   const fixtureDb=join(world,'sporting.sqlite'), configFile=join(world,'sporting.json');
-  const config={fixtureDb,validatorGenesis:await rpc.getGenesisHash(),sponsor:trial.listing.sponsor,
+  const config={fixtureDb,saleLedger:join(world,'grants.sqlite'),validatorGenesis:await rpc.getGenesisHash(),sponsor:trial.listing.sponsor,
     bbMint:trial.listing.bbMint,players:{[trial.listing.playerMint]:'northbank-7'},
     wallets:{[trial.listing.seller]:'northbank',[trial.buyer]:'eastport'},journals:[journal]};
   const write=()=>writeFileSync(configFile,JSON.stringify(config));
@@ -139,6 +141,31 @@ export async function registrationJourney(rpc,world,trial,journal,settle,manager
       const url=origin+'/api/loans/'+agreement.terms.id;
       assert.equal((await (await fetch(url)).json()).matchMinutes,minutes);
     } finally {store.close();}
+    const buyerPage=await browser.newPage();
+    await buyerPage.goto(origin);
+    await buyerPage.getByRole('link',{name:'Transfer listings'}).click();
+    await buyerPage.getByRole('link',{name:'Review loan and suspension terms'}).click();
+    await buyerPage.getByText(/Inherited parent wage share 0%/).waitFor();
+    const acknowledge=buyerPage.getByRole('button',{name:'Acknowledge terms with Solflare'});
+    assert.equal(await acknowledge.isDisabled(),true);
+    await promisify(execFile)(process.execPath,[fileURLToPath(new URL('../scripts/record-suspension.mjs',import.meta.url)),
+      configFile,String(trial.listing.playerMint),'0'],{env});
+    await buyerPage.getByRole('button',{name:'Refresh review'}).click();
+    await buyerPage.getByText(/0 matches · Verified/).waitFor();
+    const [{report}]=await (await fetch(origin+'/api/buyer-reviews')).json();
+    const wallet=String(managers.borrower.publicKey);
+    await buyerPage.exposeFunction('reviewSignature',bytes=>{
+      assert.equal(Buffer.from(bytes).toString(),buyerMessage(report,wallet));
+      return [...ed25519.sign(Uint8Array.from(bytes),managers.borrower.secretKey.slice(0,32))];
+    });
+    await buyerPage.evaluate(wallet=>{
+      window.solflare={publicKey:wallet,connect:async()=>({publicKey:wallet}),
+        signMessage:async bytes=>Uint8Array.from(await window.reviewSignature([...bytes]))};
+    },wallet);
+    await acknowledge.click();
+    await buyerPage.getByText('Sporting terms acknowledged for '+wallet+'.').waitFor();
+    assert.ok(!JSON.stringify(report).includes(agreement.terms.id));
+    await buyerPage.close();
     return receipt;
   } finally {
     try { await browser?.close(); } finally { server.kill(); await closed; }

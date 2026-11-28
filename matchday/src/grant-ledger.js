@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
+import { reviewedSportingTerms } from './buyer-review.js';
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { grantSettlement, transferTerms } from './player-transfer.js';
@@ -10,6 +11,7 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
   const db = new DatabaseSync(filename);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS grant_market (id INTEGER PRIMARY KEY CHECK(id=1), genesis TEXT NOT NULL, treasury TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS grant_sporting_source (mint TEXT PRIMARY KEY, filename TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS purchase_grants (
       mint TEXT PRIMARY KEY, bb TEXT NOT NULL, sponsor TEXT NOT NULL, owner TEXT NOT NULL,
       funded INTEGER NOT NULL, claim INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
@@ -23,6 +25,7 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
     throw new Error('Grant ledger belongs to a different network or treasury.');
   }
   const address = key => key.toBase58();
+  const source=db.prepare('SELECT filename FROM grant_sporting_source WHERE mint=?');
   const get = mint => db.prepare('SELECT * FROM purchase_grants WHERE mint=?').get(address(mint));
   function atomic(fn) {
     db.exec('BEGIN IMMEDIATE');
@@ -49,7 +52,9 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
     const relationship = from === to ? 'connected' : 'independent';
     const grant = {revision:row.revision,claim:row.claim,relationship,
       treasury:address(treasury),buyer:address(buyer)};
-    return {playerMint:row.mint,bbMint:row.bb,sponsor:row.sponsor,seller:row.owner,originalPurchaseGrant:row.funded,
+    const file=source.get(row.mint)?.filename;
+    const sporting=file && reviewedSportingTerms(file,{playerMint,bbMint,sponsor,seller},buyer,genesis);
+    return {...sporting,playerMint:row.mint,bbMint:row.bb,sponsor:row.sponsor,seller:row.owner,originalPurchaseGrant:row.funded,
       ...transferTerms({price,wages}),grant,...grantSettlement(price,row.claim,relationship)};
   }
   return {
@@ -77,7 +82,9 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
           if (!isDeepStrictEqual(JSON.parse(existing.journal),JSON.parse(journal))) throw new Error('Conflicting transfer journal.');
           return existing.receipt ? JSON.parse(existing.receipt) : null;
         }
-        const {grant} = quote(trial.listing,trial.buyer);
+        const {grant,disclosures,sportingReview} = quote(trial.listing,trial.buyer);
+        if (disclosures!==trial.listing.disclosures || !isDeepStrictEqual(sportingReview,trial.sportingReview))
+          throw new Error('The buyer sporting review changed. Review the sale again.');
         if (!isDeepStrictEqual(trial.listing.grant,grant))
           throw new Error('Grant or club control changed. Review the sale again.');
         if (this.pending(trial.listing.playerMint)) throw new Error('Reconcile the pending grant sale first.');

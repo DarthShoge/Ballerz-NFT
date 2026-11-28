@@ -72,6 +72,7 @@ export async function signTrial(rpc, sponsor, seller, buyer, assets, {ledger,rev
     const quote=ledger.quote(listing,buyer.publicKey);
     if (!isDeepStrictEqual(quote,reviewedTerms)) throw new Error('Review the current grant settlement before signing.');
     listing.grant=quote.grant;
+    if (quote.disclosures) listing.disclosures=quote.disclosures;
   }
   else {
     if (listing.grant || reviewedTerms) throw new Error('A grant quote requires its operator ledger.');
@@ -81,7 +82,8 @@ export async function signTrial(rpc, sponsor, seller, buyer, assets, {ledger,rev
   publication.sign(sponsor,seller,version);
   const purchase = purchaseListing(listing,buyer.publicKey);
   purchase.sign(sponsor,seller,buyer);
-  const trial = {listing,buyer:buyer.publicKey,publication:publication.serialize().toString('base64'),
+  const trial = {listing,buyer:buyer.publicKey,...(reviewedTerms?.sportingReview && {
+    sportingReview:reviewedTerms.sportingReview}),publication:publication.serialize().toString('base64'),
     purchase:purchase.serialize().toString('base64')};
   // Commit the sole authorized revision before releasing spendable bytes.
   if (ledger) ledger.reserve(trial,bs58.encode(purchase.signature));

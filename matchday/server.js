@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { Connection, Keypair } from '@solana/web3.js';
 import { listingApi, openListingDesk } from './src/manager-listings.js';
 import { loanApi, openLoanDesk } from './src/loan-desk.js';
+import { buyerReviewApi } from './src/buyer-review.js';
 
 const configuredEpoch = process.env.WORLD_START_UTC;
 const configuredStart = configuredEpoch === undefined ? null : Date.parse(configuredEpoch);
@@ -60,6 +61,7 @@ const server = http.createServer(async (req, res) => {
       const request = new Request(url, {method:req.method, headers:req.headers, body: parts.length ? Buffer.concat(parts) : undefined});
       const response = url.pathname.startsWith('/api/listings')
         ? await listingApi(request,await getListingDesk())
+        : url.pathname.startsWith('/api/buyer-reviews') ? await buyerReviewApi(request,loanDesk)
         : url.pathname.startsWith('/api/loans/') ? await loanApi(request,loanDesk)
         : await fixtureApi(request, db, {worldStart, playtest});
       res.writeHead(response.status, Object.fromEntries(response.headers));
