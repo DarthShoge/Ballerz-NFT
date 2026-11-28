@@ -42,6 +42,7 @@ el('open').onclick=async()=>{
   } catch (error) { if (attempt===version) el('notice').textContent=error.message; }
   finally { if (attempt===version) el('open').disabled=false; }
 };
+el('open').disabled=false;
 el('close-inbox').onclick=closeInbox;
 window.addEventListener('pagehide',closeInbox);
 el('invitation').onsubmit=event=>{
