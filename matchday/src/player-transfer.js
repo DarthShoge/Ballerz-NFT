@@ -8,6 +8,18 @@ import {
 const memoProgram = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const ata = getAssociatedTokenAddressSync;
 
+export function reserveFunding(listing,buyer) {
+  const award=listing.grant?.wageBursary;
+  if (!award) return {club:listing.wages,bursary:0};
+  if (!Number.isSafeInteger(award.bb) || award.bb<=0 || award.bb>listing.wages)
+    throw Error('Wage bursary must fit the approved whole-BB reserve.');
+  const owner=new PublicKey(award.owner);
+  if (String(owner)!==award.owner || !PublicKey.isOnCurve(owner) || [buyer,listing.sponsor,listing.seller,
+      listing.bbMint,listing.playerMint,listing.grant.treasury].some(key=>String(key)===String(owner)))
+    throw Error('Use a separate restricted wage bursary account.');
+  return {club:listing.wages-award.bb,bursary:award.bb,owner};
+}
+
 export function transferTerms({price, wages}) {
   if (!Number.isSafeInteger(price) || price <= 0 || !Number.isSafeInteger(wages) || wages < 0
       || !Number.isSafeInteger(price + wages)) throw new Error('Invalid whole-BB transfer terms.');
@@ -59,7 +71,7 @@ function termsMemo(listing, action) {
     // The buyer-specific grant quote is signed by all parties. Legacy
     // zero-grant listings retain their original wire format for recovery.
     grant:listing.grant && [listing.grant.revision,listing.grant.claim,listing.grant.relationship,
-      listing.grant.treasury,listing.grant.buyer]
+      listing.grant.treasury,listing.grant.buyer,...(listing.grant.wageBursary?[listing.grant.wageBursary]:[])]
   }))});
 }
 
@@ -110,7 +122,10 @@ export function purchaseListing(listing, buyer) {
   }
   const proceeds = split?.sellerProceeds ?? price;
   if (proceeds) tx.add(createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,seller),buyer,BigInt(proceeds),0));
-  if (wages) tx.add(createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,sponsor),buyer,BigInt(wages),0));
+  const funding=reserveFunding(listing,buyer);
+  if (funding.club) tx.add(createTransferCheckedInstruction(ata(bbMint,buyer),bbMint,ata(bbMint,sponsor),buyer,BigInt(funding.club),0));
+  if (funding.bursary) tx.add(createAssociatedTokenAccountIdempotentInstruction(sponsor,ata(bbMint,funding.owner),funding.owner,bbMint),
+    createTransferCheckedInstruction(ata(bbMint,funding.owner),bbMint,ata(bbMint,sponsor),sponsor,BigInt(funding.bursary),0));
   tx.add(createTransferCheckedInstruction(ata(playerMint,seller),playerMint,ata(playerMint,buyer),version,1n,0,
     [seller,sponsor]),termsMemo(listing,'transfer'));
   return tx;
@@ -141,9 +156,11 @@ export function verifyTransfer(record, signed, listing, buyer) {
   }
   const grant = listing.grant;
   const split = grant && grantSettlement(listing.price,grant.claim,grant.relationship);
+  const funding=reserveFunding(listing,buyer);
   return {slot:record.slot,blockTime:record.blockTime,listing:listing.version.toBase58(),
     ...(grant && {grant:{...grant,...split}, ...(split.recovered && {treasuryBB:change(listing.bbMint,new PublicKey(grant.treasury),split.recovered)})}),
-    buyerBB:change(listing.bbMint,buyer,-(listing.price+listing.wages)),
+    ...(funding.bursary && {bursaryBB:change(listing.bbMint,funding.owner,-funding.bursary)}),
+    buyerBB:change(listing.bbMint,buyer,-(listing.price+funding.club)),
     sellerBB:change(listing.bbMint,listing.seller,split?.sellerProceeds ?? listing.price),
     wageReserve:change(listing.bbMint,listing.sponsor,listing.wages),
     sellerTitle:change(listing.playerMint,listing.seller,-1),buyerTitle:change(listing.playerMint,buyer,1)};

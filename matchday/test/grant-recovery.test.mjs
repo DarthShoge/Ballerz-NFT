@@ -87,3 +87,26 @@ test('operator grants bind title, owner, currency, buyer group and treasury befo
   assert.throws(()=>ledger.quote(listing,buyer),/Control evidence disputed.*Appeal/);
   await assert.rejects(ledger.assertNetwork({getGenesisHash:async()=>'different'}),/network/);
 });
+
+test('bursary awards bind the original funding wallet, amount and buyer in the signed purchase',async t=>{
+  const [seller,buyer,treasury,bbMint,playerMint,sponsor,version,restricted,other]=Array.from({length:9},()=>Keypair.generate().publicKey);
+  const listing={seller,bbMint,playerMint,sponsor,version,price:150000,wages:30000,
+    blockhash:String(other),lastValidBlockHeight:200};
+  const groups=new Map([[String(seller),'east'],[String(buyer),'north']]);
+  const award={playerMint:String(playerMint),buyer:String(buyer),revision:0,owner:String(restricted),bb:18000};
+  const awards=[award];
+  const ledger=openGrantLedger(':memory:',{genesis:'pilot',treasury,controlGroups:groups,wageBursaries:awards});
+  t.after(()=>ledger.close());
+  await ledger.register(listing,10000);
+  const quote=()=>ledger.quote(listing,buyer);
+  assert.equal(quote().buyerDebitBB,162000);
+  const purchase=grant=>purchaseListing({...listing,grant,disclosures:'f'.repeat(64)},buyer);
+  const wire=purchase(quote().grant).serializeMessage();
+  assert.ok(purchase(quote().grant).serialize({requireAllSignatures:false}).length<=1232);
+  award.bb=17999;assert.notDeepEqual(purchase(quote().grant).serializeMessage(),wire);
+  award.bb=30000;assert.equal(quote().buyerDebitBB,150000);
+  award.bb=30001;assert.throws(quote,/reserve/);
+  award.bb=18000;award.owner=String(treasury);assert.throws(quote,/separate/);
+  award.owner=String(restricted);awards.push({...award,buyer:String(other)});assert.throws(quote,/assignment/);
+  awards.pop();groups.set(String(restricted),'elsewhere');assert.throws(quote,/assignment/);
+});

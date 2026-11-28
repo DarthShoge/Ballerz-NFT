@@ -2,6 +2,7 @@ import { GAME_YEAR_MS } from './world-clock.js';
 import { Transaction } from '@solana/web3.js';
 import { decodeTerms } from './registration-index.js';
 import { grantSettlement, verifyTransfer } from './player-transfer.js';
+import { refundTotals } from './reserve-refunds.js';
 
 export function clubReserves(db,terms,year,asOf,statement) {
   const start = terms.epoch+(year-1)*GAME_YEAR_MS, end=start+GAME_YEAR_MS;
@@ -16,8 +17,9 @@ export function clubReserves(db,terms,year,asOf,statement) {
     const sale=JSON.parse(row.terms);
     const share=statement(terms.club,year,asOf,{mint:row.mint,startAt:row.effectiveAt,endAt:row.soldAt??end}).total;
     if (!share) throw Error('Publish the wage rate for the reserved player.');
-    const deposited=BigInt(sale.listing.wages), owed=BigInt(share.wholeBB);
-    return {reference:row.reference,year,sale,limit:deposited<owed?deposited:owed};
+    const returned=refundTotals(db,row.reference);
+    const deposited=BigInt(sale.listing.wages)-returned.escrow-returned.treasury, owed=BigInt(share.wholeBB);
+    return {reference:row.reference,year,sale,treasuryReturned:returned.treasury,limit:deposited<owed?deposited:owed};
   });
 }
 
@@ -50,5 +52,5 @@ export function remainingReserveCustody(db,terms) {
     AND json_type(s.terms,'$.listing.wages')='integer'`).all(terms.genesis,terms.mint,terms.sponsor);
   const spent=db.prepare("SELECT amount FROM wage_collections WHERE sale<>''").all();
   const sum=rows=>rows.reduce((total,row)=>total+BigInt(row.amount),0n);
-  return sum(deposits)-sum(spent);
+  return sum(deposits)-sum(spent)-sum(db.prepare("SELECT amount FROM wage_refunds WHERE pocket='escrow'").all());
 }

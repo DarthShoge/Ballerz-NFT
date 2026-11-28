@@ -6,6 +6,7 @@ import { walletProof } from './loan-inbox.js';
 import { wageStatementMessage } from '../public/wage-statement-message.js';
 import { clubs } from './football.js';
 import { wageSettlement } from './wage-settlement.js';
+import { reserveSourceStatement } from './reserve-refunds.js';
 
 const names=new Map(clubs.flatMap(c=>c.squad.map(p=>[p.id,p.name])));
 const denominator=BigInt(GAME_YEAR_MS)*10000n;
@@ -77,6 +78,7 @@ export function clubLoanWages(db,loadConfig,clock=Date.now,rpc) {
       const club=manager(loadConfig(),input.wallet);
       if (!club) throw new LoanError('Use the current manager wallet for this club.',403);
       const result=statement(club,year);
+      result.reserves=reserveSourceStatement(db,club,result.start,result.end).map(row=>({...row,name:names.get(row.player)??row.player}));
       result.settlement=settlement.closed(club,year);
       db.exec('COMMIT');return result;
     }

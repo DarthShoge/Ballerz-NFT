@@ -21,7 +21,7 @@ const genesis = local && config.validatorGenesis ? config.validatorGenesis : DEV
 if (await rpc.getGenesisHash()!==genesis) throw new Error('Unexpected grant settlement network.');
 const ledger = openGrantLedger(resolve(dirname(configPath),config.ledger),{
   genesis,treasury:new PublicKey(config.treasury),
-  controlGroups:new Map(Object.entries(config.controlGroups)),reviewHolds:config.reviewHolds
+  controlGroups:new Map(Object.entries(config.controlGroups)),reviewHolds:config.reviewHolds,wageBursaries:config.wageBursaries
 });
 try {
   if (action==='register' || action==='review') {

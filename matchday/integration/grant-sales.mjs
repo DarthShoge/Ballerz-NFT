@@ -4,18 +4,20 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Keypair } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { createApproveCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { openGrantLedger } from '../src/grant-ledger.js';
 import { fixedMint, parseTrial, settleTrial, signTrial, submitSigned } from '../scripts/transfer-trial.mjs';
 import { registrationJourney } from './sporting-registration.mjs';
 import { verifyLoanResale } from './loan-resale-wages.mjs';
 import { collectionJourney } from './wage-collection.mjs';
+import { refundJourney } from './wage-refunds.mjs';
 
 export async function grantSaleJourney(rpc,payer,world,subtest) {
   const [home,affiliate,away,treasury]=Array.from({length:4},()=>Keypair.generate());
-  const bbMint=await fixedMint(rpc,payer,'grant-test-bb',[[affiliate.publicKey,180000n],[away.publicKey,400000n]]);
-  const config={genesis:await rpc.getGenesisHash(),treasury:treasury.publicKey,controlGroups:new Map(
+  const bursary=Keypair.generate();
+  const bbMint=await fixedMint(rpc,payer,'grant-test-bb',[[affiliate.publicKey,180000n],[away.publicKey,400000n],[bursary.publicKey,18000n]]);
+  const config={genesis:await rpc.getGenesisHash(),treasury:treasury.publicKey,wageBursaries:[],controlGroups:new Map(
     [[home,'A'],[affiliate,'A'],[away,'B']].map(([key,group])=>[key.publicKey.toBase58(),group]))};
   const filename=join(world,'grants.sqlite');
   const configPath=join(world,'grant-operator.json');
@@ -38,6 +40,11 @@ export async function grantSaleJourney(rpc,payer,world,subtest) {
       return {playerMint,bbMint};
     };
     const first=await issue('grant-test-connected');
+    config.wageBursaries.push({playerMint:String(first.playerMint),buyer:String(away.publicKey),revision:1,owner:String(bursary.publicKey),bb:18000});
+    writeFileSync(configPath,JSON.stringify({ledger:filename,validatorGenesis:config.genesis,treasury:config.treasury,
+      controlGroups:Object.fromEntries(config.controlGroups),wageBursaries:config.wageBursaries}));
+    await sendAndConfirmTransaction(rpc,new Transaction({feePayer:payer.publicKey}).add(createApproveCheckedInstruction(
+      getAssociatedTokenAddressSync(bbMint,bursary.publicKey),bbMint,payer.publicKey,bursary.publicKey,18000n,0)),[payer,bursary],{commitment:'finalized'});
     await assert.rejects(signTrial(rpc,payer,home,affiliate,first),/ledger/);
     const termsFile=join(world,'review.json');
     writeFileSync(termsFile,JSON.stringify({...first,sponsor:payer.publicKey,seller:home.publicKey,buyer:affiliate.publicKey,price:150000,wages:30000}));
@@ -69,14 +76,18 @@ export async function grantSaleJourney(rpc,payer,world,subtest) {
     });
     assert.deepEqual([second.grant.recovered,second.grant.sellerProceeds,second.grant.carried],[50000,25000,0]);
     assert.equal(second.sellerBB.after,'25000');
+    assert.equal(second.bursaryBB.after,'0');
+    let payrollConfig;
     await subtest.test('collect authorized sale income, preserve the player reserve and recover after a lost confirmation',
-      ()=>collectionJourney(rpc,payer,affiliate,world,first,second));
+      async()=>{payrollConfig=await collectionJourney(rpc,payer,affiliate,world,first,second);});
     const latest=ledger.quote({...resale.listing,seller:away.publicKey},home.publicKey);
     assert.equal(latest.grant.claim,0);
     assert.equal(latest.originalPurchaseGrant,200000);
-    const clearSale=await sign(away,affiliate,first,10000,0);
+    const clearSale=await sign(away,affiliate,first,1000,20000);
     const clear=await settleTrial(rpc,clearSale,ledger);
-    assert.deepEqual([clear.grant.recovered,clear.grant.sellerProceeds,clear.grant.carried],[0,10000,0]);
+    assert.deepEqual([clear.grant.recovered,clear.grant.sellerProceeds,clear.grant.carried],[0,1000,0]);
+    await subtest.test('refund unused mixed wage funding to the original accounts after resale',()=>
+      refundJourney(rpc,payer,world,payrollConfig,clearSale,second,clear));
     // Retrying a previous owner's finalized sale cannot reopen the old claim.
     assert.deepEqual(await settleTrial(rpc,sale,ledger),receipt);
     const other=await issue('grant-test-independent');

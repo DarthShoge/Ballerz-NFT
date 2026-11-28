@@ -3,11 +3,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { reviewedSportingTerms } from './buyer-review.js';
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { grantSettlement, transferTerms } from './player-transfer.js';
+import { grantSettlement, transferTerms, reserveFunding } from './player-transfer.js';
 
 // Private operator inputs. Neither control groups nor the initial funded
 // amount are accepted from a manager's listing or purchase request.
-export function openGrantLedger(filename, {genesis, treasury, controlGroups, reviewHolds=[]}) {
+export function openGrantLedger(filename, {genesis, treasury, controlGroups, reviewHolds=[], wageBursaries=[]}) {
   const db = new DatabaseSync(filename);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS grant_market (id INTEGER PRIMARY KEY CHECK(id=1), genesis TEXT NOT NULL, treasury TEXT NOT NULL);
@@ -52,10 +52,25 @@ export function openGrantLedger(filename, {genesis, treasury, controlGroups, rev
     const relationship = from === to ? 'connected' : 'independent';
     const grant = {revision:row.revision,claim:row.claim,relationship,
       treasury:address(treasury),buyer:address(buyer)};
+    const reserved=db.prepare("SELECT 1 FROM grant_sales WHERE json_extract(journal,'$.listing.grant.wageBursary.owner') IN (?,?) LIMIT 1");
+    if (reserved.get(grant.buyer,row.owner) || wageBursaries.some(a=>a.owner===grant.buyer || a.owner===row.owner))
+      throw Error('Restricted wage bursary accounts cannot trade players.');
+    const awards=wageBursaries.filter(a=>a.playerMint===row.mint && a.buyer===grant.buyer && a.revision===row.revision);
+    if (awards.length) {
+      const [{owner,bb}]=awards;
+      const used=db.prepare(`SELECT 1 FROM grant_sales WHERE json_extract(journal,'$.buyer')=?
+        OR json_extract(journal,'$.listing.seller')=? OR (json_extract(journal,'$.listing.grant.wageBursary.owner')=?
+        AND json_extract(journal,'$.buyer')<>?) LIMIT 1`).get(owner,owner,owner,grant.buyer);
+      if (awards.length!==1 || used || controlGroups.has(owner) || wageBursaries.some(a=>a.owner===owner && a.buyer!==grant.buyer))
+        throw Error('Conflicting restricted wage bursary assignment.');
+      grant.wageBursary={owner,bb};
+      reserveFunding({grant,sponsor,seller,bbMint,playerMint,wages},buyer);
+    }
     const file=source.get(row.mint)?.filename;
     const sporting=file && reviewedSportingTerms(file,{playerMint,bbMint,sponsor,seller},buyer,genesis);
     return {...sporting,playerMint:row.mint,bbMint:row.bb,sponsor:row.sponsor,seller:row.owner,originalPurchaseGrant:row.funded,
-      ...transferTerms({price,wages}),grant,...grantSettlement(price,row.claim,relationship)};
+      ...transferTerms({price,wages}),...(grant.wageBursary && {buyerDebitBB:price+wages-grant.wageBursary.bb}),
+      grant,...grantSettlement(price,row.claim,relationship)};
   }
   return {
     async assertNetwork(rpc) {
