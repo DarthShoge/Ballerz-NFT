@@ -64,12 +64,14 @@ test('a confirmed loan hands training to the borrower and returns it to the fina
   assert.equal(desk.finish(unused.id,'completed').status,'released');
   assert.throws(()=>submit(parent,{...unused,id:randomUUID()}),/control/);
   const second=order(borrower);submit(borrower,second);submit(borrower,second,other);
+  assert.ok(!read(parent).players[0].sessions.some(s=>s.id===second.id || (s.club==='northbank' && s.status==='reserved')));
   w.sale('northbank-7',buyer);w.config.loanManagers.eastport=w.key(buyer);
-  assert.deepEqual(read(parent).players,[]);
+  assert.throws(()=>read(parent),/Verify this wallet/);
   assert.equal(read(buyer).players[0].canBook,false);
   assert.deepEqual(other.finish(second.id,'completed'),{status:'completed',weight:50});
   assert.deepEqual(desk.finish(second.id,'completed'),{status:'completed',weight:50});
   assert.equal(read(buyer).players[0].sessions.filter(s=>s.status==='completed').length,2);
+  assert.ok(read(buyer).players[0].sessions.every(s=>!s.id));
   assert.throws(()=>submit(borrower,order(borrower)),/allowance/);
   w.tick(4*GAME_WEEK_MS+99);
   const last=order(borrower);submit(borrower,last);desk.finish(last.id,'completed');
@@ -103,6 +105,10 @@ test('club capacity, cancellation, eligibility and authenticated reads hold acro
   assert.equal(read(parent).available,6);
   assert.throws(()=>submit(parent,invalid),/control/);
   const wallet=w.key(parent),ticket=desk.challenge(wallet,w.origin);
+  assert.deepEqual(desk.challenge(wallet,w.origin),ticket);
+  const unknown=w.key(Keypair.generate());
+  const unregistered=desk.challenge(unknown,w.origin);
+  assert.notEqual(desk.challenge(unknown,w.origin).nonce,unregistered.nonce);
   const input={wallet,nonce:ticket.nonce,signature:w.sign(parent,trainingAccess(w.origin,wallet,ticket))};
   const post=(path,origin)=>loanApi(new Request(w.origin+'/api/loans/training'+path,{method:'POST',
     headers:{host:'localhost:4173',origin,'content-type':'application/json'},body:JSON.stringify(input)}),{training:desk});

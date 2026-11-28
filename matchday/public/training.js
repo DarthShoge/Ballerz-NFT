@@ -10,6 +10,8 @@ function close() {
   version++; unwatch?.(); unwatch=undefined; signer=report=undefined; busy=false;
   el('report').hidden=el('close').hidden=true; el('open').disabled=false;
   el('players').replaceChildren();el('sessions').replaceChildren();el('notice').textContent='';
+  el('skill').replaceChildren();
+  for (const field of ['allowance','control','dates','workload']) el(field).textContent='';
 }
 async function post(suffix,data) {
   const response=await fetch('/api/loans/training'+suffix,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});

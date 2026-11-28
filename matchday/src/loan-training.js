@@ -82,7 +82,9 @@ export function loanTraining(db,loadConfig,clock=Date.now) {
         controller:title.club,canBook:controlling,authority:title.authority,
         loan:title.term && {borrower:title.terms.borrower,startAt:title.term.startAt,endAt:title.term.endAt},
         available:playerLimit-ownRows.filter(counts).length,
-        sessions:ownRows.filter(row=>parent || controlling || row.wallet===wallet).map(({id,club,skill,status,weight})=>({id,club,skill,status,weight}))});
+        sessions:ownRows.filter(row=>row.wallet===wallet || (row.status==='completed' && (parent || controlling)))
+          .map(row=>({club:row.club,skill:row.skill,status:row.status,weight:row.weight,
+            ...(row.wallet===wallet && row.status==='reserved' ? {id:row.id} : {})}))});
     }
     return {wallet,club:club ?? null,genesis:world.config.genesis,sponsor:world.config.sponsor,week:world.week,
       available:clubLimit-rows.filter(row=>counts(row) && row.club===club).length,players};
@@ -98,6 +100,7 @@ export function loanTraining(db,loadConfig,clock=Date.now) {
       ed25519.verify(Buffer.from(signature,'base64'),Buffer.from(message),new PublicKey(order.wallet).toBytes(),{zip215:false}); }
     catch { /* Invalid key or signature. */ }
     if (!verified) throw new LoanError('Sign the exact training order with your manager wallet.',403);
+    if (!designated(loadConfig(),order.wallet,order.club)) throw new LoanError('This wallet cannot manage training for this club.',403);
     return transaction('IMMEDIATE',()=>{
       const world=snapshot(),title=world.titles.get(order.mint);
       releaseInvalid(world);
@@ -133,7 +136,10 @@ export function loanTraining(db,loadConfig,clock=Date.now) {
       return {status,weight};
     });
   }
-  return {challenge:proof.challenge,read(input,origin) {
+  return {challenge(wallet,origin) {
+    const config=loadConfig(),club=config.wallets?.[wallet];
+    return proof.challenge(wallet,origin,Boolean(club && designated(config,wallet,club)));
+  },read(input,origin) {
     proof.verify(input,origin);
     return transaction('DEFERRED',()=>report(input.wallet,snapshot()));
   },submit,finish};

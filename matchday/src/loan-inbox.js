@@ -7,7 +7,7 @@ import { clubs } from './football.js';
 
 export function walletProof(message,clock=Date.now) {
   const pending=new Map();
-  function challenge(wallet,origin) {
+  function challenge(wallet,origin,retain=true) {
     let valid=false;
     if (typeof wallet==='string' && wallet.length<=44) {
       try { valid=new PublicKey(wallet).toBase58()===wallet && PublicKey.isOnCurve(wallet); } catch { /* invalid address */ }
@@ -15,9 +15,13 @@ export function walletProof(message,clock=Date.now) {
     if (!valid)
       throw new LoanError('Choose a valid manager wallet.',400);
     const now=clock();
-    for (const [id,item] of pending) if (item.expiresAt<=now) pending.delete(id);
-    if (pending.size>=512) throw new LoanError('The loan inbox is busy. Try again shortly.',429);
     const ticket={nonce:randomUUID(),expiresAt:now+120000};
+    if (!retain) return ticket;
+    for (const [id,item] of pending) {
+      if (item.expiresAt<=now) pending.delete(id);
+      else if (item.wallet===wallet && item.origin===origin) return {nonce:item.nonce,expiresAt:item.expiresAt};
+    }
+    if (pending.size>=512) throw new LoanError('The loan inbox is busy. Try again shortly.',429);
     pending.set(ticket.nonce,{...ticket,wallet,origin});
     return ticket;
   }
