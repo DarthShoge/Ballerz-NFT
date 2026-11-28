@@ -1,5 +1,6 @@
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, createTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction,
+  createTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { clubs } from './football.js';
 
 const memoProgram = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
@@ -25,7 +26,9 @@ export function wagePaymentInstructions(terms, amount) {
   const destination = getAssociatedTokenAddressSync(mint, new PublicKey(terms.treasury));
   const memo = ['ballerz-loan-wages-v1',terms.genesis,terms.sponsor,terms.epoch,terms.club].join('/');
   return [createTransferCheckedInstruction(source, mint, destination, owner, amount, 0),
-    new TransactionInstruction({programId:memoProgram,keys:[],data:Buffer.from(memo)})];
+    new TransactionInstruction({programId:memoProgram,keys:[],data:Buffer.from(memo)}),
+    createAssociatedTokenAccountIdempotentInstruction(owner,destination,new PublicKey(terms.treasury),mint),
+    createAssociatedTokenAccountIdempotentInstruction(owner,source,owner,mint)];
 }
 
 export async function finalizedWagePayment(rpc, terms, signature) {
@@ -36,7 +39,7 @@ export async function finalizedWagePayment(rpc, terms, signature) {
   const {accountKeys,instructions} = tx.transaction.message;
   const [transfer,memo] = instructions;
   const details = transfer?.parsed?.info, quantity = details?.tokenAmount;
-  if (instructions.length !== 2 || transfer.parsed?.type !== 'transferChecked' ||
+  if (![2,4].includes(instructions.length) || transfer.parsed?.type !== 'transferChecked' ||
       !transfer.programId.equals(TOKEN_PROGRAM_ID) || quantity?.decimals !== 0 ||
       !/^\d+$/.test(quantity.amount) || details.authority !== terms.payroll ||
       !accountKeys.some(key => key.signer && key.pubkey.toBase58() === terms.payroll))
@@ -44,6 +47,12 @@ export async function finalizedWagePayment(rpc, terms, signature) {
   const amount = BigInt(quantity.amount);
   const [expected,tag] = wagePaymentInstructions(terms,amount);
   const [source,mint,destination] = expected.keys.map(key => key.pubkey.toBase58());
+  for (const [index,ix] of instructions.slice(2).entries()) {
+    const info=ix.parsed?.info;
+    if (!ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID) || ix.parsed?.type!=='createIdempotent' ||
+        info.account!==(index===0?destination:source) || info.wallet!==(index===0?terms.treasury:terms.payroll) ||
+        info.mint!==mint || info.source!==terms.payroll) throw Error('Unexpected payroll account ownership instruction.');
+  }
   if (details.source !== source || details.mint !== mint || details.destination !== destination ||
       !memo.programId.equals(memoProgram) || memo.parsed !== tag.data.toString())
     throw Error('The payment does not match the club, treasury or wage market.');

@@ -104,4 +104,8 @@ test('club payroll moves the signed whole BB and preserves both balances when un
   assert.deepEqual(balances(),[80n,0n]);
   assert.ok(!(pay(40n) instanceof FailedTransactionMetadata));
   assert.deepEqual(balances(),[40n,40n]);
+  const rotate=createSetAuthorityInstruction(to,treasury.publicKey,AuthorityType.AccountOwner,Keypair.generate().publicKey);
+  assert.ok(!(send(new Transaction().add(rotate),treasury) instanceof FailedTransactionMetadata));
+  assert.ok(pay(10n) instanceof FailedTransactionMetadata);
+  assert.deepEqual(balances(),[40n,40n]);
 });
