@@ -11,7 +11,7 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
     treasury:wallet(),payroll:{northbank:wallet(),eastport:wallet()}}};
   const db = new DatabaseSync(':memory:'); t.after(()=>db.close());
   const epoch = 100000;
-  db.exec('CREATE TABLE world_clock(id,start_at); CREATE TABLE fixtures(state); CREATE TABLE sporting_sales(status)');
+  db.exec('CREATE TABLE world_clock(id,start_at); CREATE TABLE fixtures(state); CREATE TABLE sporting_sales(status,terms); CREATE TABLE sporting_wallets(wallet)');
   db.exec('CREATE TABLE sporting_players(genesis,bb,sponsor)');
   db.prepare('INSERT INTO world_clock VALUES(1,?)').run(epoch);
   let now = epoch+GAME_YEAR_MS-1000, slot = 1, genesis = config.genesis;
@@ -23,6 +23,9 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
   };
   const ledger = wageSettlement(db,rpc,()=>config,statement,()=>now);
   const reconcile = () => ledger.reconcile('eastport');
+  db.prepare('INSERT INTO sporting_sales VALUES(?,?)').run('finalized',JSON.stringify({listing:{grant:{treasury:config.wageSettlement.payroll.eastport}}}));
+  await assert.rejects(reconcile(),/grant treasury custody/);
+  db.exec('DELETE FROM sporting_sales');
   rpc.getLatestBlockhash=async()=>({blockhash:wallet(),lastValidBlockHeight:100});
   db.prepare('INSERT INTO sporting_players VALUES(?,?,?)').run('another pilot',config.bbMint,config.sponsor);
   await assert.rejects(ledger.prepare('eastport','1'),/sporting market/);
@@ -41,7 +44,7 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
   now = epoch+2*GAME_YEAR_MS;
   db.prepare('INSERT INTO fixtures VALUES(?)').run(JSON.stringify({appearanceApproval:{},schedule:{kickoffAt:epoch}}));
   await assert.rejects(reconcile(),/match rewards/);
-  db.exec('DELETE FROM fixtures; INSERT INTO sporting_sales VALUES(\'pending\')');
+  db.exec("DELETE FROM fixtures; INSERT INTO sporting_sales(status) VALUES('pending')");
   await assert.rejects(reconcile(),/sporting transfers/);
   db.exec('DELETE FROM sporting_sales');
   assert.deepEqual((await reconcile()).years.map(r=>r.arrears),['1','3']);
