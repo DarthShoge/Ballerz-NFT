@@ -4,7 +4,7 @@ import bs58 from 'bs58';
 import { clubs } from './football.js';
 import { purchaseListing, verifyTransfer } from './player-transfer.js';
 
-function decodeTerms({listing,buyer}) {
+export function decodeTerms({listing,buyer}) {
   const decoded={price:listing.price,wages:listing.wages,blockhash:listing.blockhash,
     lastValidBlockHeight:listing.lastValidBlockHeight};
   if (listing.disclosures!==undefined) decoded.disclosures=listing.disclosures;

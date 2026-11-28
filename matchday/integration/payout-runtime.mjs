@@ -10,6 +10,7 @@ import {
 import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
 import { appearanceBatch, treasuryAddresses } from '../src/devnet-settlement.js';
 import { wagePaymentInstructions } from '../src/wage-payment.js';
+import { collectionTransaction } from '../src/wage-collector.js';
 
 function payrollRuntime() {
   const svm = new LiteSVM().withSigverify(true);
@@ -78,7 +79,7 @@ test('signed payout instructions roll back together and a new blockhash cannot p
   assert.equal(svm.getAccount(another.marker),null);
 });
 
-test('club payroll moves the signed whole BB and preserves both balances when underfunded', () => {
+test('club payroll collections preserve balances on duplicate, underfunded and changed-owner instructions', async () => {
   const svm = payrollRuntime();
   const source = Keypair.generate(), treasury = Keypair.generate(), mint = Keypair.generate();
   svm.airdrop(source.publicKey,2_000_000_000n);
@@ -104,8 +105,14 @@ test('club payroll moves the signed whole BB and preserves both balances when un
   assert.deepEqual(balances(),[80n,0n]);
   assert.ok(!(pay(40n) instanceof FailedTransactionMetadata));
   assert.deepEqual(balances(),[40n,40n]);
+  const claim={sale:'',income:'',holder:terms.payroll,year:0,offset:'0',amount:'5'};
+  const {tx}=await collectionTransaction(terms,terms.payroll,claim,{blockhash:svm.latestBlockhash(),lastValidBlockHeight:50},
+    Number(svm.minimumBalanceForRentExemption(0n)));
+  assert.ok(!(send(tx) instanceof FailedTransactionMetadata));
+  assert.ok(send(tx) instanceof FailedTransactionMetadata);
+  assert.deepEqual(balances(),[35n,45n]);
   const rotate=createSetAuthorityInstruction(to,treasury.publicKey,AuthorityType.AccountOwner,Keypair.generate().publicKey);
   assert.ok(!(send(new Transaction().add(rotate),treasury) instanceof FailedTransactionMetadata));
   assert.ok(pay(10n) instanceof FailedTransactionMetadata);
-  assert.deepEqual(balances(),[40n,40n]);
+  assert.deepEqual(balances(),[35n,45n]);
 });

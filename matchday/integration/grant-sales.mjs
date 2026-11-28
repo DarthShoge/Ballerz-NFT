@@ -10,6 +10,7 @@ import { openGrantLedger } from '../src/grant-ledger.js';
 import { fixedMint, parseTrial, settleTrial, signTrial, submitSigned } from '../scripts/transfer-trial.mjs';
 import { registrationJourney } from './sporting-registration.mjs';
 import { verifyLoanResale } from './loan-resale-wages.mjs';
+import { collectionJourney } from './wage-collection.mjs';
 
 export async function grantSaleJourney(rpc,payer,world) {
   const [home,affiliate,away,treasury]=Array.from({length:4},()=>Keypair.generate());
@@ -68,6 +69,7 @@ export async function grantSaleJourney(rpc,payer,world) {
     });
     assert.deepEqual([second.grant.recovered,second.grant.sellerProceeds,second.grant.carried],[50000,25000,0]);
     assert.equal(second.sellerBB.after,'25000');
+    await collectionJourney(rpc,payer,affiliate,world,first,second);
     const latest=ledger.quote({...resale.listing,seller:away.publicKey},home.publicKey);
     assert.equal(latest.grant.claim,0);
     assert.equal(latest.originalPurchaseGrant,200000);

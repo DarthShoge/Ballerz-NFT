@@ -2,6 +2,8 @@ import { PublicKey, Transaction } from '@solana/web3.js';
 import { GAME_YEAR_MS } from './world-clock.js';
 import { clubs } from './football.js';
 import { finalizedWagePayment, payrollTerms, wagePaymentInstructions } from './wage-payment.js';
+import { clubReserves } from './wage-reserves.js';
+import { wageCollector } from './wage-collector.js';
 
 export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
   db.exec(`CREATE TABLE IF NOT EXISTS wage_market (id INTEGER PRIMARY KEY CHECK(id=1), binding TEXT NOT NULL) STRICT;
@@ -10,7 +12,13 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     CREATE TABLE IF NOT EXISTS wage_closings (club TEXT NOT NULL, year INTEGER NOT NULL, due TEXT NOT NULL,
       paid TEXT NOT NULL, arrears TEXT NOT NULL, carry TEXT NOT NULL, slot INTEGER NOT NULL, checkedAt INTEGER NOT NULL,
       PRIMARY KEY(club,year)) STRICT;
-    CREATE TABLE IF NOT EXISTS wage_credit (club TEXT PRIMARY KEY, available TEXT NOT NULL, slot INTEGER NOT NULL) STRICT;`);
+    CREATE TABLE IF NOT EXISTS wage_credit (club TEXT PRIMARY KEY, available TEXT NOT NULL, slot INTEGER NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS wage_reserve_applied (club TEXT NOT NULL, year INTEGER NOT NULL, amount TEXT NOT NULL,
+      PRIMARY KEY(club,year)) STRICT;
+    CREATE TABLE IF NOT EXISTS wage_collection_pending (club TEXT PRIMARY KEY, signature TEXT UNIQUE NOT NULL,
+      details TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS wage_collections (signature TEXT PRIMARY KEY, club TEXT NOT NULL, sale TEXT NOT NULL,
+      income TEXT NOT NULL, year INTEGER NOT NULL, amount TEXT NOT NULL, slot INTEGER NOT NULL) STRICT;`);
   function market(club) {
     const epoch = db.prepare('SELECT start_at FROM world_clock WHERE id=1').get()?.start_at;
     if (!Number.isSafeInteger(epoch)) throw Error('Set the shared wage calendar first.');
@@ -45,13 +53,13 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     } catch (error) {db.exec('ROLLBACK');throw error;}
     return {terms,wholeBB,lastValidBlockHeight:block.lastValidBlockHeight,unsignedTransaction};
   }
-  async function reconcile(club,signature) {
+  async function reconcile(club,signature,{verified,after}={}) {
     const {terms,binding} = market(club);
     await checkNetwork(terms);
     const receipt = signature ? await finalizedWagePayment(rpc,terms,signature) : null;
     const slot = await rpc.getSlot('finalized');
     const time = await rpc.getBlockTime(slot);
-    if (!Number.isSafeInteger(slot) || !Number.isSafeInteger(time) || (receipt && receipt.slot > slot))
+    if (!Number.isSafeInteger(slot) || !Number.isSafeInteger(time) || (receipt && receipt.slot > slot) || (verified && verified.slot>slot))
       throw Error('A finalized payroll checkpoint is required.');
     const asOf = Math.min(clock(),time*1000);
     if (asOf < terms.epoch) throw Error('The wage calendar has not started at this checkpoint.');
@@ -59,6 +67,15 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     db.exec('BEGIN IMMEDIATE');
     try {
       pinMarket(club,binding);
+      const pending=db.prepare('SELECT * FROM wage_collection_pending WHERE club=?').get(club);
+      if (verified && pending?.signature===verified.signature) {
+        const {sale,income,year,amount}=JSON.parse(pending.details);
+        db.prepare('INSERT INTO wage_collections VALUES(?,?,?,?,?,?,?)').run(verified.signature,club,sale,income,year,amount,verified.slot);
+        db.prepare('DELETE FROM wage_collection_pending WHERE signature=?').run(verified.signature);
+      } else if (verified && !db.prepare('SELECT 1 FROM wage_collections WHERE signature=? AND club=?').get(verified.signature,club)) {
+        throw Error('Automatic payment differs from the recorded collection.');
+      }
+      if (pending && receipt) throw Error('Recover the pending collection before importing a manual payment.');
       const previous = db.prepare('SELECT slot FROM wage_credit WHERE club=?').get(club);
       const lastYear = db.prepare('SELECT MAX(year) AS year FROM wage_closings WHERE club=?').get(club).year;
       if (previous?.slot > slot || lastYear > closedYears) throw Error('Retry with a current finalized checkpoint.');
@@ -74,7 +91,8 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
             json_extract(state,'$.schedule.kickoffAt') >= ? AND json_extract(state,'$.schedule.kickoffAt') < ? AND
             json_extract(state,'$.appearanceReceipt') IS NULL LIMIT 1`).get(terms.epoch,cutoff)))
         throw Error('Reconcile pending sporting transfers and match rewards before closing wages.');
-      let available = db.prepare('SELECT amount FROM wage_receipts WHERE club=?').all(club)
+      let available = db.prepare(`SELECT amount FROM wage_receipts WHERE club=? UNION ALL
+        SELECT amount FROM wage_collections WHERE club=? AND sale=''`).all(club,club)
         .reduce((sum,row) => sum + BigInt(row.amount),0n);
       let carry = 0n;
       const years = [];
@@ -86,22 +104,36 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
         carry += BigInt(report.total.remainder);
         const due = BigInt(report.total.wholeBB) + carry/denominator;
         carry %= denominator;
-        const paid = available < due ? available : due;
-        available -= paid;
+        let reserved=0n;
+        const payments=db.prepare("SELECT sale,amount FROM wage_collections WHERE club=? AND year=? AND sale<>''").all(club,year);
+        if (payments.length) {
+          for (const reserve of clubReserves(db,terms,year,asOf,statement)) {
+            const remitted=payments.filter(p=>p.sale===reserve.reference).reduce((sum,p)=>sum+BigInt(p.amount),0n);
+            reserved+=remitted<reserve.limit?remitted:reserve.limit;
+          }
+        }
+        const uncovered=due-reserved;
+        const ordinary=available<uncovered?available:uncovered;
+        const paid=reserved+ordinary;
+        available-=ordinary;
         const arrears = due-paid;
         save.run(club,year,String(due),String(paid),String(arrears),String(carry),slot,asOf);
+        db.prepare('INSERT OR REPLACE INTO wage_reserve_applied VALUES(?,?,?)').run(club,year,String(reserved));
         years.push({year,due:String(due),paid:String(paid),arrears:String(arrears)});
       }
       db.prepare('INSERT OR REPLACE INTO wage_credit VALUES(?,?,?)').run(club,String(available),slot);
+      const result={club,slot,asOf,years,unappliedBB:String(available)};
+      after?.(result,terms);
       db.exec('COMMIT');
-      return {club,slot,asOf,years,unappliedBB:String(available)};
+      return result;
     } catch (error) {db.exec('ROLLBACK');throw error;}
   }
   function closed(club,year) {
     const row = db.prepare('SELECT due,paid,arrears,carry,slot,checkedAt FROM wage_closings WHERE club=? AND year=?').get(club,year);
     if (!row) return null;
     market(club);
-    return row;
+    return {...row,reservePaid:db.prepare('SELECT amount FROM wage_reserve_applied WHERE club=? AND year=?').get(club,year)?.amount??'0'};
   }
-  return {prepare,reconcile,closed};
+  return {prepare,reconcile:(club,signature)=>reconcile(club,signature),closed,
+    collect:wageCollector(db,rpc,market,statement,reconcile)};
 }

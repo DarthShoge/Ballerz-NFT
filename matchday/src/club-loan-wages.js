@@ -32,14 +32,17 @@ export function clubLoanWages(db,loadConfig,clock=Date.now,rpc) {
     const start=epoch+(year-1)*GAME_YEAR_MS,end=start+GAME_YEAR_MS,asOf=Math.min(now,end);
     return {year,currentYear,start,end,asOf};
   }
-  function statement(club,requested,now=clock()) {
+  function statement(club,requested,now=clock(),period) {
     const config=loadConfig(),{year,currentYear,start,end,asOf}=calendar(requested,now);
     if (db.prepare('SELECT 1 FROM sporting_players WHERE genesis<>? OR bb<>? OR sponsor<>? LIMIT 1')
       .get(config.genesis,config.bbMint,config.sponsor)) throw new LoanError('The sporting register belongs to a different wage market.');
     const lines=[];
     let total=0n,complete=true;
     for (const row of loans.all(year,end,start,config.genesis,config.bbMint,config.sponsor)) {
-      const terms=JSON.parse(row.terms),from=Math.max(start,terms.startAt),until=Math.min(end,terms.endAt);
+      const terms=JSON.parse(row.terms);
+      if (period && terms.mint!==period.mint) continue;
+      const from=Math.max(start,terms.startAt,period?.startAt??start),until=Math.min(end,terms.endAt,period?.endAt??end);
+      if (until<=from) continue;
       const history=sales.all(terms.ownershipReference);
       const through=Math.min(asOf,until);
       if (through<=from) {

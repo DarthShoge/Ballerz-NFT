@@ -34,7 +34,8 @@ el('lookup').onsubmit=async event=>{
     if (settled) {
       const bb=value=>BigInt(value).toLocaleString()+' test BB';
       el('settlement').textContent='Due '+bb(settled.due)+' · Paid '+bb(settled.paid)+' · Arrears '+bb(settled.arrears)+
-        ' · Reconciled '+time(settled.checkedAt)+' at finalized slot '+settled.slot+'. Only imported payments are included.';
+        (settled.reservePaid && settled.reservePaid!=='0'?' · Paid from purchase reserves '+bb(settled.reservePaid):'')+
+        ' · Reconciled '+time(settled.checkedAt)+' at finalized slot '+settled.slot+'. Only verified payments are included.';
     } else {
       el('settlement').textContent=result.year===result.currentYear?'This wage year is still open.':'Awaiting year-end reconciliation.';
     }

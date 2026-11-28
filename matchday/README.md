@@ -171,7 +171,19 @@ The pilot allocates prepaid test BB to closed wage years, oldest first. In the o
 2. Run `node scripts/reconcile-loan-wages.mjs operator.json reconcile eastport SIGNATURE` to admit the finalized payment. Repeating the command recovers the same credit. The operator must submit each payment signature. A payment awaiting import is excluded from the displayed checkpoint.
 3. Run `node scripts/reconcile-loan-wages.mjs operator.json reconcile eastport` at year-end, after match rewards and sporting transfers are reconciled, and after any late ownership correction. Repeat for Northbank. The operator can admit payments before year-end. Unapplied funds remain club-specific, and whole BB from accumulated fractions carry into later bills.
 
-The settlement worker posts accounting entries against remitted BB. Connecting a manager wallet only reads its statement. Club income sweeping, grant-reserve allocation, automatic recalls and transfer bans are separate workflows.
+### Automatic wage collection
+
+Run `node scripts/collect-loan-wages.mjs operator.json eastport reserve /private/path/to/custody-key.json --watch` for the local pilot. The worker polls every 15 seconds and collects one eligible payment per pass. Omit `--watch` for one pass. The CLI loads the signer in the worker process. The matchday HTTP server only serves the manager’s read-only statement. Use a single durable fixture database for each market and back it up with SQLite’s backup mechanism.
+
+| Source argument | Signer | Funds available to settle closed wage bills |
+| --- | --- | --- |
+| `reserve` | Transfer pilot custody sponsor | Buyer-funded wage deposits verified against the original finalized player purchase. The maximum is that player's whole accrued share during the buyer's ownership in the purchase year, the unspent deposit and the club's outstanding bill for that year. |
+| `proceeds` | Club’s dedicated payroll wallet | Finalized sale proceeds after grant recovery. The seller authorizes a bounded SPL token allowance to the payroll wallet on its test BB account. The worker checks the current delegate, remaining allowance, net proceeds, available BB and club arrears. Revocation takes effect on chain. |
+| `income` | Club’s dedicated payroll wallet | Same-mint BB available in the club payroll account, capped at remaining arrears. This includes ordinary club wage funding and income routed directly to that wallet. The original appearance and transfer trial currencies are distinct. |
+
+For a club with a reserved player, run reserve collection first to apply those funds before using general income. A late sale correction can restrict how much of an earlier reserve payment still applies. Excess from that payment stays attributed to its purchase in treasury custody. Unspent deposits stay in their original custody. Grant-funded wage bursaries, proportional refunds and competition-entry enforcement are separate release work.
+
+Each payment carries an on-chain receipt marker. A worker journals the signed transaction before sending, verifies finalized token-balance changes and posts the receipt once. Restart the same command to recover an interrupted submission. A missing finalized history for an existing marker requires recovery of the original journal. Club payroll and reserve source accounts need enough Devnet SOL for fees and marker rent. An SPL delegate can spend up to its approved allowance, so use only an allowance intended for this pilot, and keep the worker keys private.
 
 ### Focused training on loan
 
