@@ -21,6 +21,12 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
       const signed=message.toString('utf8');
       if (signed.startsWith('View my Ballerz loan agreements\n')) {
         assert.ok(signed.startsWith('View my Ballerz loan agreements\n'+origin+'\nWallet: '+manager.publicKey+'\nRequest: '));
+      } else if (signed.startsWith('View my Ballerz training report\n')) {
+        assert.ok(signed.startsWith('View my Ballerz training report\n'+origin+'\nWallet: '+manager.publicKey+'\n'));
+      } else if (signed.startsWith('Ballerz focused training v1\n')) {
+        assert.equal(role,'parent');
+        assert.ok(signed.includes('Manager: '+manager.publicKey+'\nClub: eastport\n'));
+        assert.ok(signed.includes('Player mint: '+agreement.terms.mint+'\nSkill: passing\n'));
       } else assert.equal(signed,loanMessage(agreement.terms));
       return Buffer.from(ed25519.sign(message,manager.secretKey.slice(0,32))).toString('base64');
     });
@@ -74,5 +80,18 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     const retry=await fetch(api+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(second.body)});
     assert.deepEqual(await retry.json(),second.view);
     assert.deepEqual(await (await fetch(api)).json(),second.view);
+    for (const page of [borrower,parent]) {
+      await page.getByRole('link',{name:'Focused training'}).click();
+      await page.getByRole('button',{name:'Open training report with Solflare'}).click();
+      await page.getByText('Training controlled by Eastport Rovers.').waitFor();
+    }
+    assert.equal(await borrower.getByRole('button',{name:'Reserve session'}).isDisabled(),true);
+    await parent.getByLabel('Technical skill').selectOption('passing');
+    await parent.getByRole('button',{name:'Reserve session'}).click();
+    await parent.getByText(/Session reserved\./).waitFor();
+    await parent.getByRole('button',{name:'Open training report with Solflare'}).click();
+    await parent.getByText('1 of 2 player sessions available.').waitFor();
+    await parent.getByRole('button',{name:'Cancel reservation'}).click();
+    await parent.getByText(/Session cancelled\./).waitFor();
   } finally {await parent.close();await borrower.close();}
 }

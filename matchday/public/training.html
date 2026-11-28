@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Focused training · Ballerz</title><link rel="stylesheet" href="/matchday.css"><link rel="stylesheet" href="/listings.css"></head>
+<body><header class="mast"><div class="wrap mast-inner"><a class="brand" href="/">Ballerz<span>.</span></a><div class="mast-rule"></div>
+<nav class="club-nav" aria-label="Club management"><a href="/">Match centre</a><a href="/my-loans.html">My loans</a></nav></div></header>
+<main class="desk"><h1>Focused training</h1><p>Six free sessions per club each game week. Each player can complete two across all clubs.</p>
+<button id="open">Open training report with Solflare</button> <button id="close" hidden>Close report</button>
+<p role="status" id="notice"></p>
+<section id="report" hidden><h2>This game week</h2><p id="allowance"></p>
+<label for="players">Registered player</label><select id="players"></select>
+<div id="details" hidden><p id="control"></p><p id="dates"></p><p id="workload"></p>
+<label for="skill">Technical skill</label><select id="skill"></select><button id="book">Reserve session</button>
+<h3>Sessions this week</h3><ul id="sessions"></ul></div></section></main>
+<script src="/vendor/solana.js"></script><script type="module" src="/training.js"></script></body></html>
