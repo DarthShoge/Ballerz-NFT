@@ -49,7 +49,7 @@ export function refundPositions(db,terms,closing) {
   if (db.prepare("SELECT 1 FROM sporting_sales WHERE status='pending' LIMIT 1").get())
     throw Error('Reconcile pending sporting transfers before releasing reserves.');
   const rows=db.prepare(`SELECT s.reference,s.terms,s.effectiveAt,s.slot,p.mint,p.player,n.effectiveAt soldAt,n.slot soldSlot,
-      json_extract(n.terms,'$.listing.wages') replacement
+      json_extract(n.terms,'$.listing.wages') replacement,json_extract(n.terms,'$.listing.seller') nextSeller
     FROM sporting_sales s JOIN sporting_players p USING(player) LEFT JOIN sporting_sales n ON n.reference=(
       SELECT later.reference FROM sporting_sales later WHERE later.player=s.player AND later.status='finalized'
        AND (later.slot,later.position)>(s.slot,s.position) ORDER BY later.slot,later.position LIMIT 1)
@@ -66,6 +66,7 @@ export function refundPositions(db,terms,closing) {
     const exposure=earned(db,terms,row,until,year);
     if (!exposure) continue;
     const sale=JSON.parse(row.terms),deposit=BigInt(sale.listing.wages);
+    if (row.soldAt!==null && row.nextSeller!==sale.buyer) continue;
     const bursary=BigInt(sale.listing.grant?.wageBursary?.bb??0), returned=refundTotals(db,row.reference);
     const spent=db.prepare('SELECT amount FROM wage_collections WHERE sale=?').all(row.reference)
       .reduce((v,r)=>v+BigInt(r.amount),0n);

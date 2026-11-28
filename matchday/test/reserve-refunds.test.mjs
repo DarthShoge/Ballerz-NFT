@@ -36,7 +36,7 @@ test('returns follow signed sources, protect earned wages and reconcile later tr
   const closing={slot:2,asOf:101,years:[]};
   const claim=(pocket='escrow')=>refundClaim(db,terms,closing,pocket,1000n);
   assert.equal(claim(),null);
-  insert.run('winger','sale','{}','north','pending',101,2);
+  insert.run('winger','sale',JSON.stringify({listing:{seller:'original',wages:0}}),'north','pending',101,2);
   assert.throws(()=>claim(),/pending/);
   db.exec("UPDATE sporting_sales SET status='finalized' WHERE reference='sale'");
   assert.equal(claim(),null);
@@ -46,7 +46,10 @@ test('returns follow signed sources, protect earned wages and reconcile later tr
   closing.slot=1;assert.equal(claim(),null);
   closing.slot=2;
   assert.equal(claim(),null); // The next buyer has yet to fund the unused portion.
-  db.prepare("UPDATE sporting_sales SET terms=? WHERE reference='sale'").run(JSON.stringify({listing:{wages:60}}));
+  const replace=db.prepare("UPDATE sporting_sales SET terms=? WHERE reference='sale'");
+  replace.run(JSON.stringify({listing:{wages:60,seller:'unknown'}}));
+  assert.equal(claim(),null); // An intervening finalized sale is missing from this title's history.
+  replace.run(JSON.stringify({listing:{wages:60,seller:'original'}}));
   // 20 ordinary BB and 20 loan BB are earned; 60 are unused.
   assert.deepEqual([claim().amount,claim().recipient],['36','restricted']);
   db.exec("INSERT INTO wage_collections VALUES('purchase','50')");
