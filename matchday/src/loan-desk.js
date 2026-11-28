@@ -23,8 +23,9 @@ export function openLoanDesk(file, expectedDb) {
   config();
   const db = new DatabaseSync(filename);
   try {
-    return {...loanAgreements(db,new Connection(endpoint,'finalized'),config),inbox:loanInbox(db),training:loanTraining(db,config),
-      statements:clubLoanWages(db,config),close:()=>db.close()};
+    const rpc=new Connection(endpoint,'finalized');
+    return {...loanAgreements(db,rpc,config),inbox:loanInbox(db),training:loanTraining(db,config),
+      statements:clubLoanWages(db,config,Date.now,rpc),close:()=>db.close()};
   } catch (error) { db.close(); throw error; }
 }
 

@@ -157,11 +157,21 @@ With the shared world clock initialized, the operator can publish a player's app
 
 The agreement shows the published rates and the accrual over the confirmed loan term in test BB. For example, at 52,000 BB per year, a four-week loan accrues 4,000 BB. With a 75% borrower share and a sale halfway through, the borrower accrues 3,000 BB, the old parent 500 BB and the new parent 500 BB. If the borrower buys the player, its two obligations appear under one club. A delayed index uses the finalized sale's effective time. A fixture that runs past the agreed return cannot extend wage accrual.
 
-Liabilities are reconstructed from the signed shares, immutable rates and finalized ownership history. The report keeps exact fractions per club and displays whole BB. A missing rate for elapsed time makes the total unavailable until the operator supplies it. Reading the report does not move reserves or settle a payment. Wage settlement, training, automatic suspension service and early recalls remain open. [S11-05](https://github.com/DarthShoge/Ballerz-NFT/issues/68) · [Wage timing](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md) · [Founder wage rules](../docs/studio/founder-rules.md)
+Liabilities are reconstructed from the signed shares, immutable rates and finalized ownership history. The report keeps exact fractions per club and displays whole BB. A missing rate for elapsed time makes the total unavailable until the operator supplies it. [S11-05](https://github.com/DarthShoge/Ballerz-NFT/issues/68) · [Wage timing](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md) · [Founder wage rules](../docs/studio/founder-rules.md)
 
 ### Club loan wage statements
 
-The club-wide loan wage statement is available under **Match centre → Loans → Club loan wages**. Open a wage year using the designated manager’s Solflare wallet. The statement combines that club’s shares across confirmed agreements, including fractional BB before rounding. Finalized sales affect the parent share from their effective time. An unpublished rate for an elapsed, chargeable period makes the total unavailable. The statement is a read-only calculation and does not record a payment, arrears or a settlement checkpoint. [Wage timing and ownership](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md)
+The club-wide loan wage statement is available under **Match centre → Loans → Club loan wages**. Open a wage year using the designated manager’s Solflare wallet. The read-only signature names the selected year. The statement shows accrued wages and, after reconciliation, the billed, paid and outstanding amounts at the operator’s last checkpoint. [Wage timing and ownership](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md)
+
+### Year-end loan payroll
+
+The pilot allocates prepaid test BB to closed wage years, oldest first. In the operator JSON set `wageSettlement.treasury` to the dedicated wage treasury public key and `wageSettlement.payroll.northbank` and `wageSettlement.payroll.eastport` to the separate club payroll public keys. Use previously unused payroll wallets and provision the ordinary associated test BB token accounts for the treasury and paying clubs. Each paying wallet needs Devnet SOL for its own transaction fee. The first reconciliation pins the accounts, currency, network, sponsor and calendar to this fixture database.
+
+1. Run `node scripts/reconcile-loan-wages.mjs operator.json prepare eastport 40` for a 40 test BB prepayment. The command prints the public terms and an unsigned transaction. The club payroll wallet reviews, signs and submits this transfer separately. Keep its signature for recovery.
+2. Run `node scripts/reconcile-loan-wages.mjs operator.json reconcile eastport SIGNATURE` to admit the finalized payment. Repeating the command recovers the same credit. The operator must submit each payment signature. A payment awaiting import is excluded from the displayed checkpoint.
+3. Run `node scripts/reconcile-loan-wages.mjs operator.json reconcile eastport` at year-end, after match rewards and sporting transfers are reconciled, and after any late ownership correction. Repeat for Northbank. The operator can admit payments before year-end. Unapplied funds remain club-specific, and whole BB from accumulated fractions carry into later bills.
+
+The settlement worker posts accounting entries against remitted BB. Connecting a manager wallet only reads its statement. Club income sweeping, grant-reserve allocation, automatic recalls and transfer bans are separate workflows.
 
 ### Focused training on loan
 
