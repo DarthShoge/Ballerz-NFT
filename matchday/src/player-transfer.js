@@ -143,8 +143,9 @@ export function verifyTransfer(record, signed, listing, buyer) {
     function balance(rows, before) {
       if (!Array.isArray(rows) || index < 0) throw new Error('Missing transfer balance evidence.');
       const row = rows.find(r => r.accountIndex === index);
-      // The purchase creates missing ATAs idempotently in this same message.
-      if (!row && before && record.meta.preBalances[index] === 0) return 0n;
+      // A newly initialized ATA can already hold SOL. The signed instructions
+      // and exact post-balance establish a zero opening token balance for a credit.
+      if (!row && before && expected>=0) return 0n;
       if (!row || row.mint !== mint.toBase58() || row.owner !== owner.toBase58() || row.uiTokenAmount.decimals !== 0)
         throw new Error('Unexpected transfer account or currency.');
       return BigInt(row.uiTokenAmount.amount);

@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { Keypair, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import { createApproveCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { openGrantLedger } from '../src/grant-ledger.js';
 import { fixedMint, parseTrial, settleTrial, signTrial, submitSigned } from '../scripts/transfer-trial.mjs';
@@ -43,7 +43,9 @@ export async function grantSaleJourney(rpc,payer,world,subtest) {
     config.wageBursaries.push({playerMint:String(first.playerMint),buyer:String(away.publicKey),revision:1,owner:String(bursary.publicKey),bb:18000});
     writeFileSync(configPath,JSON.stringify({ledger:filename,validatorGenesis:config.genesis,treasury:config.treasury,
       controlGroups:Object.fromEntries(config.controlGroups),wageBursaries:config.wageBursaries}));
-    await sendAndConfirmTransaction(rpc,new Transaction({feePayer:payer.publicKey}).add(createApproveCheckedInstruction(
+    await sendAndConfirmTransaction(rpc,new Transaction({feePayer:payer.publicKey}).add(
+      SystemProgram.transfer({fromPubkey:payer.publicKey,toPubkey:getAssociatedTokenAddressSync(bbMint,treasury.publicKey),
+        lamports:await rpc.getMinimumBalanceForRentExemption(0)}),createApproveCheckedInstruction(
       getAssociatedTokenAddressSync(bbMint,bursary.publicKey),bbMint,payer.publicKey,bursary.publicKey,18000n,0)),[payer,bursary],{commitment:'finalized'});
     await assert.rejects(signTrial(rpc,payer,home,affiliate,first),/ledger/);
     const termsFile=join(world,'review.json');
