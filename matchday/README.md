@@ -159,6 +159,10 @@ The agreement shows the published rates and the accrual over the confirmed loan 
 
 Liabilities are reconstructed from the signed shares, immutable rates and finalized ownership history. The report keeps exact fractions per club and displays whole BB. A missing rate for elapsed time makes the total unavailable until the operator supplies it. Reading the report does not move reserves or settle a payment. Wage settlement, training, automatic suspension service and early recalls remain open. [S11-05](https://github.com/DarthShoge/Ballerz-NFT/issues/68) · [Wage timing](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md) · [Founder wage rules](../docs/studio/founder-rules.md)
 
+### Club loan wage statements
+
+The club-wide loan wage statement is available under **Match centre → Loans → Club loan wages**. Open a wage year using the designated manager’s Solflare wallet. The statement combines that club’s shares across confirmed agreements, including fractional BB before rounding. Finalized sales affect the parent share from their effective time. An unpublished rate for an elapsed, chargeable period makes the total unavailable. The statement is a read-only calculation and does not record a payment, arrears or a settlement checkpoint. [Wage timing and ownership](../docs/adr/0009-fund-first-squads-with-ballerbuckz.md)
+
 ### Focused training on loan
 
 Players can also be managed through **Match centre → Loans → Focused training**. Open the report with the designated club wallet. A confirmed borrower can see the start date before taking training control. During the term the borrower reserves sessions and the current parent can read the weekly report. At the exclusive end date control returns to the current registered owner. A sale during the term preserves the borrower's reservations.

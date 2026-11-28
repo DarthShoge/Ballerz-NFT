@@ -21,6 +21,8 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
       const signed=message.toString('utf8');
       if (signed.startsWith('View my Ballerz loan agreements\n')) {
         assert.ok(signed.startsWith('View my Ballerz loan agreements\n'+origin+'\nWallet: '+manager.publicKey+'\nRequest: '));
+      } else if (signed.startsWith('View my Ballerz club loan wages\n')) {
+        assert.ok(signed.startsWith('View my Ballerz club loan wages\n'+origin+'\nWallet: '+manager.publicKey+'\n'));
       } else if (signed.startsWith('View my Ballerz training report\n')) {
         assert.ok(signed.startsWith('View my Ballerz training report\n'+origin+'\nWallet: '+manager.publicKey+'\n'));
       } else if (signed.startsWith('Ballerz focused training v1\n')) {
@@ -93,5 +95,11 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     await parent.getByText('1 of 2 player sessions available.').waitFor();
     await parent.getByRole('button',{name:'Cancel reservation'}).click();
     await parent.getByText(/Session cancelled\./).waitFor();
+    await borrower.getByRole('link',{name:'My loans'}).click();
+    await borrower.getByRole('link',{name:'Club loan wages'}).click();
+    await borrower.getByRole('button',{name:'Open statement with Solflare'}).click();
+    await borrower.getByText('Northbank Athletic · Wage year 1').waitFor();
+    await borrower.getByText('Total accrued · 0 test BB').waitFor();
+    await borrower.getByText(/Jude Kavan.*scheduled/).waitFor();
   } finally {await parent.close();await borrower.close();}
 }
