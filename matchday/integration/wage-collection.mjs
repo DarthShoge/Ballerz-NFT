@@ -29,12 +29,20 @@ export async function collectionJourney(rpc,payer,seller,world,assets,receipt) {
     await send(new Transaction().add(
       SystemProgram.transfer({fromPubkey:payer.publicKey,toPubkey:payroll.publicKey,lamports:10000000}),
       createAssociatedTokenAccountIdempotentInstruction(payer.publicKey,ata(treasury),treasury,mint),
-      createAssociatedTokenAccountIdempotentInstruction(payer.publicKey,ata(payroll.publicKey),payroll.publicKey,mint)));
+      createAssociatedTokenAccountIdempotentInstruction(payer.publicKey,ata(payroll.publicKey),payroll.publicKey,mint),
+      createTransferCheckedInstruction(ata(seller.publicKey),mint,ata(payroll.publicKey),seller.publicKey,2n,0)),seller);
     const open=connection=>clubLoanWages(db,()=>config,Date.now,connection).settlement;
     const ledger=open(rpc);
     const collect=(mode,signer)=>ledger.collect('eastport',mode,signer);
     const debt=BigInt((await ledger.reconcile('eastport')).years[0].arrears);
     assert.ok(debt>=30100n);
+    const manual=await ledger.prepare('eastport','2');
+    assert.equal((await collect('income',payroll)).status,'awaiting manual payment');
+    const signed=Transaction.from(Buffer.from(manual.unsignedTransaction,'base64'));
+    signed.sign(payroll);
+    const signature=await rpc.sendRawTransaction(signed.serialize());
+    await rpc.confirmTransaction({signature,blockhash:signed.recentBlockhash,lastValidBlockHeight:manual.lastValidBlockHeight},'finalized');
+    await ledger.reconcile('eastport',signature);
     assert.equal((await collect('proceeds',payroll)).status,'no eligible funds');
     await assert.rejects(collect('reserve',payroll),/source signer/);
     await send(new Transaction().add(createApproveCheckedInstruction(ata(seller.publicKey),mint,payroll.publicKey,
@@ -50,7 +58,7 @@ export async function collectionJourney(rpc,payer,seller,world,assets,receipt) {
     await assert.rejects(open(lostReply).collect('eastport','proceeds',payroll),/interrupted/);
     assert.equal((await collect('proceeds',payroll)).amount,'5');
     assert.equal((await collect('proceeds',payroll)).status,'no eligible funds');
-    const rest=debt-30005n;
+    const rest=debt-30007n;
     await send(new Transaction().add(createTransferCheckedInstruction(ata(seller.publicKey),mint,ata(payroll.publicKey),
       seller.publicKey,rest+1n,0)),seller);
     assert.equal((await collect('income',payroll)).amount,String(rest));

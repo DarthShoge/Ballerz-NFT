@@ -43,6 +43,35 @@ function verifyCollection(record,tx,terms,source,amount) {
 
 export function wageCollector(db,rpc,market,statement,reconcile,config) {
   const pending=club=>db.prepare('SELECT * FROM wage_collection_pending WHERE club=?').get(club);
+  async function resolveManual(terms) {
+    const intents=db.prepare('SELECT * FROM wage_manual_intents WHERE club=?').all(terms.club);
+    if (!intents.length) return true;
+    const height=await rpc.getBlockHeight('finalized');
+    if (intents.some(intent=>intent.lastHeight>=height)) return false;
+    const start=intents.reduce((slot,i)=>Math.min(slot,i.firstSlot),Infinity);
+    if (await rpc.getFirstAvailableBlock()>start) throw Error('Restore finalized history to reconcile earlier manual wage requests.');
+    const messages=new Set(intents.map(i=>i.message));
+    const key=new PublicKey(terms.payroll);
+    let before;
+    while (messages.size) {
+      const page=await rpc.getSignaturesForAddress(key,{limit:100,before,minContextSlot:start},'finalized');
+      for (const row of page) {
+        if (row.slot<start || row.err) continue;
+        const record=await rpc.getTransaction(row.signature,{commitment:'finalized',maxSupportedTransactionVersion:0});
+        if (record?.transaction.signatures[0]!==row.signature) throw Error('Missing finalized manual payment history.');
+        const message=Buffer.from(record.transaction.message.serialize()).toString('base64');
+        if (messages.has(message)) {
+          await reconcile(terms.club,row.signature);
+          messages.delete(message);
+        }
+      }
+      if (page.length<100 || page.at(-1).slot<start) break;
+      before=page.at(-1).signature;
+    }
+    // The finalized root passed expiry and retained history spans issuance.
+    for (const message of messages) db.prepare('DELETE FROM wage_manual_intents WHERE message=?').run(message);
+    return true;
+  }
   function quote(terms,closing,mode,balance,income='') {
     const prior=(sale,income='')=>db.prepare('SELECT amount FROM wage_collections WHERE club=? AND sale=? AND income=?').all(terms.club,sale,income)
       .reduce((sum,row)=>sum+BigInt(row.amount),0n);
@@ -117,6 +146,7 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
     if (String(signer.publicKey)!==source) throw Error('Use the configured collection source signer.');
     const existing=pending(club);
     if (existing) return recover(existing,terms);
+    if (!await resolveManual(terms)) return {status:'awaiting manual payment'};
     const closing=await reconcile(club);
     if (closing.years.every(year=>year.arrears==='0')) return {status:'no arrears'};
     const mint=new PublicKey(terms.mint);
@@ -153,6 +183,8 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
     const details={...claim,source,block,rent,bytes:tx.serialize().toString('base64')};
     await reconcile(club,undefined,{after(latest,current) {
       if (pending(club)) return;
+      if (db.prepare('SELECT 1 FROM wage_manual_intents WHERE club=?').get(club))
+        throw Error('A manual wage request was prepared. Reconcile it before automatic collection.');
       const revised=quote(current,latest,mode,balance,claim.income);
       if (JSON.stringify(terms)!==JSON.stringify(current) || !revised || revised.sale!==claim.sale ||
           revised.amount!==claim.amount || revised.offset!==claim.offset) throw Error('Collection changed. Retry with current evidence.');

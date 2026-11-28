@@ -17,6 +17,8 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
       PRIMARY KEY(club,year)) STRICT;
     CREATE TABLE IF NOT EXISTS wage_collection_pending (club TEXT PRIMARY KEY, signature TEXT UNIQUE NOT NULL,
       details TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS wage_manual_intents (message TEXT PRIMARY KEY, club TEXT NOT NULL,
+      firstSlot INTEGER NOT NULL, lastHeight INTEGER NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS wage_collection_costs (signature TEXT PRIMARY KEY, signer TEXT NOT NULL, lamports INTEGER NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS wage_collections (signature TEXT PRIMARY KEY, club TEXT NOT NULL, sale TEXT NOT NULL,
       income TEXT NOT NULL, year INTEGER NOT NULL, amount TEXT NOT NULL, slot INTEGER NOT NULL) STRICT;`);
@@ -43,6 +45,7 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     const {terms,binding} = market(club);
     await checkNetwork(terms);
     if (!/^[1-9]\d{0,19}$/.test(wholeBB)) throw Error('Choose a positive whole-BB amount.');
+    const firstSlot=await rpc.getSlot('finalized');
     const block = await rpc.getLatestBlockhash('finalized');
     const tx = new Transaction({feePayer:new PublicKey(terms.payroll),...block})
       .add(...wagePaymentInstructions(terms,BigInt(wholeBB)));
@@ -50,6 +53,10 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     db.exec('BEGIN IMMEDIATE');
     try {
       pinMarket(club,binding);
+      if (db.prepare('SELECT 1 FROM wage_collection_pending WHERE club=?').get(club))
+        throw Error('Recover the pending automatic payment before preparing a manual prepayment.');
+      db.prepare('INSERT OR IGNORE INTO wage_manual_intents VALUES(?,?,?,?)').run(
+        tx.serializeMessage().toString('base64'),club,firstSlot,block.lastValidBlockHeight);
       db.exec('COMMIT');
     } catch (error) {db.exec('ROLLBACK');throw error;}
     return {terms,wholeBB,lastValidBlockHeight:block.lastValidBlockHeight,unsignedTransaction};
@@ -58,6 +65,12 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
     const {terms,binding} = market(club);
     await checkNetwork(terms);
     const receipt = signature ? await finalizedWagePayment(rpc,terms,signature) : null;
+    let manualMessage;
+    if (receipt && db.prepare('SELECT 1 FROM wage_manual_intents WHERE club=? LIMIT 1').get(club)) {
+      const raw=await rpc.getTransaction(signature,{commitment:'finalized',maxSupportedTransactionVersion:0});
+      if (raw?.transaction.signatures[0]!==signature) throw Error('Missing finalized manual payment message.');
+      manualMessage=Buffer.from(raw.transaction.message.serialize()).toString('base64');
+    }
     const slot = await rpc.getSlot('finalized');
     const time = await rpc.getBlockTime(slot);
     if (!Number.isSafeInteger(slot) || !Number.isSafeInteger(time) || (receipt && receipt.slot > slot) || (verified && verified.slot>slot))
@@ -85,6 +98,7 @@ export function wageSettlement(db, rpc, config, statement, clock = Date.now) {
         const stored = db.prepare('SELECT * FROM wage_receipts WHERE signature=?').get(signature);
         if (stored.club !== club || stored.slot !== receipt.slot || stored.amount !== receipt.amount)
           throw Error('Wage payment conflicts with an existing receipt.');
+        if (manualMessage) db.prepare('DELETE FROM wage_manual_intents WHERE club=? AND message=?').run(club,manualMessage);
       }
       const cutoff = terms.epoch + closedYears*GAME_YEAR_MS;
       if (closedYears && (db.prepare("SELECT 1 FROM sporting_sales WHERE status='pending' LIMIT 1").get() ||
