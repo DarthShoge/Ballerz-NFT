@@ -9,6 +9,7 @@ import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { openGrantLedger } from '../src/grant-ledger.js';
 import { fixedMint, parseTrial, settleTrial, signTrial, submitSigned } from '../scripts/transfer-trial.mjs';
 import { registrationJourney } from './sporting-registration.mjs';
+import { verifyLoanResale } from './loan-resale-wages.mjs';
 
 export async function grantSaleJourney(rpc,payer,world) {
   const [home,affiliate,away,treasury]=Array.from({length:4},()=>Keypair.generate());
@@ -61,8 +62,10 @@ export async function grantSaleJourney(rpc,payer,world) {
     assert.equal(ledger.pending(first.playerMint),undefined);
     assert.deepEqual(await settleTrial(rpc,sale,ledger),receipt);
 
-    const resale=await sign(affiliate,away,first,75000);
-    const second=await settleTrial(rpc,resale,ledger);
+    const {resale,second}=await verifyLoanResale(rpc,world,sale,receipt,affiliate,home,away,async()=>{
+      const resale=await sign(affiliate,away,first,75000);
+      return {resale,second:await settleTrial(rpc,resale,ledger)};
+    });
     assert.deepEqual([second.grant.recovered,second.grant.sellerProceeds,second.grant.carried],[50000,25000,0]);
     assert.equal(second.sellerBB.after,'25000');
     const latest=ledger.quote({...resale.listing,seller:away.publicKey},home.publicKey);

@@ -21,6 +21,18 @@ function render() {
   if (agreement.confirmedAt!==null)
     el('state').textContent+=' · Recorded '+new Date(agreement.confirmedAt).toISOString()+' at finalized ownership slot '+agreement.ownershipSlot+
       '. Verified match minutes on loan: '+agreement.matchMinutes+'.';
+  const {rates,clubs,through}=agreement.wages;
+  const list=(id,lines)=>el(id).replaceChildren(...lines.map(line=>{
+    const li=document.createElement('li'); li.textContent=line; return li;
+  }));
+  list('rates',rates.length ? rates.map(rate=>'Year '+rate.year+' annual wage · '+rate.annualBB.toLocaleString()+' test BB') :
+    ['Annual wage awaiting publication.']);
+  let accrual='Accrual begins when a confirmed loan starts.';
+  if (status==='superseded' || status==='expired') accrual='This proposal accrued no wages.';
+  else if (clubs===null) accrual='Accrued amounts unavailable until the annual rate is published for the elapsed term.';
+  else if (through>terms.startAt) accrual='Accrued through '+new Date(through).toISOString()+'. Whole test BB shown. Fractional amounts carry forward to settlement.';
+  el('accrual').textContent=accrual;
+  list('shares',(clubs ?? []).map(row=>row.club+' · '+BigInt(row.wholeBB).toLocaleString()+' test BB'));
   const address=signer?.address;
   el('account').textContent=address?'Connected wallet · '+address:'';
   const canApprove=(address===terms.ownerWallet && !parentApproved) || (address===terms.borrowerWallet && !borrowerApproved);

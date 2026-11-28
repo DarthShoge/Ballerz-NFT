@@ -5,6 +5,8 @@ import { loanMessage } from '../public/loan-message.js';
 export async function managerLoanJourney(browser,origin,agreement,managers,checkPendingFixture) {
   const url=origin+agreement.reviewPath;
   const api=origin+'/api/loans/'+agreement.terms.id;
+  assert.equal((await fetch(api+'/publish-rate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({mint:agreement.terms.mint,year:1,annualBB:0})})).status,404);
   const withoutSignature=await fetch(api+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({wallet:agreement.terms.ownerWallet,signature:''})});
   assert.equal(withoutSignature.status,403);
@@ -45,6 +47,8 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     assert.equal(page.url(),url);
     // Reopening a private invitation must reach the same review directly.
     await page.goto(url);
+    await page.getByText('Year 1 annual wage · 52,000 test BB').waitFor();
+    await page.getByText('Accrual begins when a confirmed loan starts.').waitFor();
     await page.getByRole('button',{name:'Connect Solflare'}).click();
     await page.getByText('Connected wallet · '+manager.publicKey).waitFor();
     return page;

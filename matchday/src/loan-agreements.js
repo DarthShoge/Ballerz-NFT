@@ -5,6 +5,7 @@ import { loanMessage } from '../public/loan-message.js';
 import { reviewLoan } from './loan-review.js';
 import { clubWallets } from './club-wallets.js';
 import { sportingRegister } from './sporting-register.js';
+import { loanWages } from './loan-wages.js';
 
 export class LoanError extends Error {
   constructor(message, status = 409) { super(message); this.status = status; }
@@ -22,6 +23,7 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
     CREATE INDEX IF NOT EXISTS loan_periods ON loan_agreements(mint,startAt,endAt);`);
   const find = db.prepare('SELECT * FROM loan_agreements WHERE id=?');
   const registration = sportingRegister(db,clock);
+  const wages = loanWages(db);
   const wallets = clubWallets(db);
   const overlapping = db.prepare(`SELECT * FROM loan_agreements
     WHERE mint=? AND startAt < ? AND endAt > ? AND superseded=0`);
@@ -46,7 +48,8 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
       status = now < row.startAt ? 'scheduled' : now < row.endAt ? 'active' : 'ended';
     else if (now >= row.startAt) status = 'expired';
     const {matchMinutes}=db.prepare('SELECT COALESCE(SUM(minutes),0) AS matchMinutes FROM sporting_loan_minutes WHERE agreement=?').get(row.id);
-    return {terms: JSON.parse(row.terms), status, matchMinutes, parentApproved: !!row.parentSignature,
+    const terms = JSON.parse(row.terms);
+    return {terms, status, matchMinutes, wages:wages.report(terms,row.confirmedAt !== null,now), parentApproved: !!row.parentSignature,
       borrowerApproved: !!row.borrowerSignature, confirmedAt: row.confirmedAt, ownershipSlot: row.ownershipSlot};
   }
   function checkAuthority(terms,now) {
@@ -118,5 +121,5 @@ export function loanAgreements(db, rpc, loadConfig, clock = Date.now) {
       return view(get(id));
     });
   }
-  return {propose, approve, get:id=>view(get(id))};
+  return {propose, approve, get:id=>view(get(id)), publishRate:input=>write(()=>wages.publish(loadConfig(),input))};
 }
