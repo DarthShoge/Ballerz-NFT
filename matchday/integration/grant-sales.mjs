@@ -12,7 +12,7 @@ import { registrationJourney } from './sporting-registration.mjs';
 import { verifyLoanResale } from './loan-resale-wages.mjs';
 import { collectionJourney } from './wage-collection.mjs';
 
-export async function grantSaleJourney(rpc,payer,world) {
+export async function grantSaleJourney(rpc,payer,world,subtest) {
   const [home,affiliate,away,treasury]=Array.from({length:4},()=>Keypair.generate());
   const bbMint=await fixedMint(rpc,payer,'grant-test-bb',[[affiliate.publicKey,180000n],[away.publicKey,400000n]]);
   const config={genesis:await rpc.getGenesisHash(),treasury:treasury.publicKey,controlGroups:new Map(
@@ -69,7 +69,8 @@ export async function grantSaleJourney(rpc,payer,world) {
     });
     assert.deepEqual([second.grant.recovered,second.grant.sellerProceeds,second.grant.carried],[50000,25000,0]);
     assert.equal(second.sellerBB.after,'25000');
-    await collectionJourney(rpc,payer,affiliate,world,first,second);
+    await subtest.test('collect authorized sale income, preserve the player reserve and recover after a lost confirmation',
+      ()=>collectionJourney(rpc,payer,affiliate,world,first,second));
     const latest=ledger.quote({...resale.listing,seller:away.publicKey},home.publicKey);
     assert.equal(latest.grant.claim,0);
     assert.equal(latest.originalPurchaseGrant,200000);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import { wageSettlement } from '../src/wage-settlement.js';
 import { GAME_YEAR_MS } from '../src/world-clock.js';
 
@@ -34,6 +34,16 @@ test('close after rewards, preserve fractions across years, and reconcile oldest
   config.wageSettlement.treasury=treasury;
   rpc.getLatestBlockhash=async()=>({blockhash:wallet(),lastValidBlockHeight:100});
   assert.ok((await ledger.prepare('eastport','1')).unsignedTransaction);
+  const collector={publicKey:new PublicKey(config.wageSettlement.payroll.eastport)};
+  rpc.getBlockHeight=async()=>100;
+  assert.equal((await ledger.collect('eastport','income',collector)).status,'awaiting manual payment');
+  rpc.getBlockHeight=async()=>101;
+  rpc.getFirstAvailableBlock=async()=>slot+1;
+  await assert.rejects(ledger.collect('eastport','income',collector),/Restore finalized history/);
+  rpc.getFirstAvailableBlock=async()=>slot;
+  rpc.getSignaturesForAddress=async()=>[];
+  assert.equal((await ledger.collect('eastport','income',collector)).status,'no arrears');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM wage_manual_intents').get().n,0);
   config.wageSettlement.treasury=wallet();
   await assert.rejects(reconcile(),/registered payroll market changed/);
   config.wageSettlement.treasury=treasury;
