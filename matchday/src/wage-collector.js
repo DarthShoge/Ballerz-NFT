@@ -9,12 +9,18 @@ import { refundClaim } from './reserve-refunds.js';
 const memoProgram = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const minimum = (...amounts) => amounts.reduce((a,b)=>a<b?a:b);
 
-export async function collectionTransaction(terms,source,claim,block,rent) {
+async function collectionMarker(terms,source,claim) {
   const owner=new PublicKey(source);
   const purpose=claim.refund?['ballerz-refund-v1',terms,claim.sale,claim.pocket,claim.refund,claim.recipient,claim.offset]:
     ['ballerz-collection-v1',terms,claim.sale,claim.income,claim.offset];
   const seed=createHash('sha256').update(JSON.stringify(purpose)).digest('hex').slice(0,32);
   const marker=await PublicKey.createWithSeed(owner,seed,memoProgram);
+  return {seed,marker};
+}
+
+export async function collectionTransaction(terms,source,claim,block,rent) {
+  const owner=new PublicKey(source);
+  const {marker,seed}=await collectionMarker(terms,source,claim);
   const mint=new PublicKey(terms.mint),holder=new PublicKey(claim.holder),recipient=new PublicKey(claim.refund?claim.recipient:terms.treasury);
   const from=getAssociatedTokenAddressSync(mint,holder),to=getAssociatedTokenAddressSync(mint,recipient);
   const destination=createAssociatedTokenAccountIdempotentInstruction(owner,to,recipient,mint);
@@ -37,8 +43,10 @@ function verifyCollection(record,tx,terms,details,amount) {
     const index=record.transaction.message.accountKeys.findIndex(key=>key.equals(ata));
     function balance(rows,before=false) {
       const row=rows?.find(r=>r.accountIndex===index && r.mint===terms.mint && r.owner===owner && r.uiTokenAmount.decimals===0);
-      if (before && details.refund && delta>0n && Array.isArray(rows) && !rows.some(r=>r.accountIndex===index) &&
-          index>=0 && record.meta.preBalances[index]===0) return 0n;
+      // SOL can already occupy an address before its token account is created.
+      // The exact signed transfer and post-balance below independently establish the opening zero.
+      if (before && details.refund && delta>0n && index>=0 && Array.isArray(rows) &&
+          !rows.some(r=>r.accountIndex===index)) return 0n;
       if (!row) throw Error('Missing collection balance evidence.');
       return BigInt(row.uiTokenAmount.amount);
     }
@@ -187,9 +195,17 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
     if (!candidate) return {status:'no eligible funds'};
     const {proof,...claim}=candidate;
     if (proof) await verifyFundingSale(rpc,proof,terms);
+    if (refund && proof.exit) await verifyFundingSale(rpc,proof.exit,terms);
     const block=await rpc.getLatestBlockhash('finalized'),rent=await rpc.getMinimumBalanceForRentExemption(0);
     const {tx,marker}=await collectionTransaction(terms,source,claim,block,rent);
-    if (await rpc.getAccountInfo(marker,'finalized')) throw Error('Collection marker already exists. Recover the original journal.');
+    const context={commitment:'finalized',minContextSlot:closing.slot};
+    if (refund) {
+      const otherPocket=claim.pocket==='escrow'?'treasury':'escrow';
+      const otherSource=otherPocket==='treasury'?terms.treasury:terms.sponsor;
+      const other=await collectionMarker(terms,otherSource,{...claim,pocket:otherPocket});
+      const markers=await rpc.getMultipleAccountsInfo([marker,other.marker],context);
+      if (markers.some(Boolean)) throw Error('Refund marker already exists. Recover the original journal.');
+    } else if (await rpc.getAccountInfo(marker,context)) throw Error('Collection marker already exists. Recover the original journal.');
     const fee=(await rpc.getFeeForMessage(tx.compileMessage(),'finalized')).value;
     const maxRent=rent+(refund?await rpc.getMinimumBalanceForRentExemption(ACCOUNT_SIZE):0);
     if (!Number.isSafeInteger(fee) || fee<0 || !Number.isSafeInteger(rent) || rent<=0 || !Number.isSafeInteger(fee+maxRent))
@@ -204,7 +220,9 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
       const revised=quote(current,latest,mode,balance,claim.income);
       if (JSON.stringify(terms)!==JSON.stringify(current) || !revised || revised.sale!==claim.sale ||
           revised.amount!==claim.amount || revised.offset!==claim.offset || revised.refund!==claim.refund ||
-          revised.recipient!==claim.recipient) throw Error('Collection changed. Retry with current evidence.');
+          revised.recipient!==claim.recipient || (refund && (revised.proof.exit?.reference!==proof.exit?.reference ||
+          revised.proof.exit?.effectiveAt!==proof.exit?.effectiveAt || revised.proof.effectiveAt!==proof.effectiveAt)))
+        throw Error('Collection changed. Retry with current evidence.');
       const cap=config().wageSettlement.collectionBudgetLamports?.[source];
       const spent=db.prepare('SELECT COALESCE(SUM(lamports),0) AS total FROM wage_collection_costs WHERE signer=?').get(source).total;
       if (!Number.isSafeInteger(cap) || cap-spent<fee+maxRent) throw Error('Collection exceeds the configured signer fee and rent budget.');

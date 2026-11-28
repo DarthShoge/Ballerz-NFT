@@ -87,7 +87,7 @@ export async function grantSaleJourney(rpc,payer,world,subtest) {
     const clear=await settleTrial(rpc,clearSale,ledger);
     assert.deepEqual([clear.grant.recovered,clear.grant.sellerProceeds,clear.grant.carried],[0,1000,0]);
     await subtest.test('refund unused mixed wage funding to the original accounts after resale',()=>
-      refundJourney(rpc,payer,world,payrollConfig,clearSale,second,clear));
+      refundJourney(rpc,payer,world,payrollConfig,clearSale,second,clear,bursary));
     // Retrying a previous owner's finalized sale cannot reopen the old claim.
     assert.deepEqual(await settleTrial(rpc,sale,ledger),receipt);
     const other=await issue('grant-test-independent');

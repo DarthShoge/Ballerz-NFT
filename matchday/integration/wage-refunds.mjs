@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
-import { PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { createCloseAccountInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { clubLoanWages } from '../src/club-loan-wages.js';
 import { indexTransfers } from '../src/registration-index.js';
 import { openStore } from '../src/local-store.js';
 import { GAME_YEAR_MS } from '../src/world-clock.js';
 
-export async function refundJourney(rpc,payer,world,config,resale,purchase,exit) {
+export async function refundJourney(rpc,payer,world,config,resale,purchase,exit,bursarySigner) {
   const file=join(world,'collection.sqlite'),store=openStore(file),db=new DatabaseSync(file);
   try {
     const mint=resale.listing.bbMint,playerMint=String(resale.listing.playerMint);
@@ -26,6 +26,27 @@ export async function refundJourney(rpc,payer,world,config,resale,purchase,exit)
     const refund=()=>open(rpc).collect('northbank','refund-escrow',payer);
     assert.equal((await refund()).status,'no eligible funds');
     await indexTransfers(rpc,store.registration,config,[resale]);
+    // Both markers are checked at the same finalized checkpoint. Missing exit
+    // evidence or an existing marker in the other pocket requires recovery.
+    function override(field,fn) {
+      return new Proxy(rpc,{get(target,key) {
+        if (key===field) return fn;
+        const value=target[key];return typeof value==='function'?value.bind(target):value;
+      }});
+    }
+    const noExit=override('getTransaction',(sig,options)=>sig===exit.signature?null:rpc.getTransaction(sig,options));
+    await assert.rejects(open(noExit).collect('northbank','refund-escrow',payer),/Unverified purchase/);
+    const prior=override('getMultipleAccountsInfo',async(keys,options)=>{
+      assert.equal(keys.length,2);assert.notEqual(String(keys[0]),String(keys[1]));assert.ok(options.minContextSlot>=exit.slot);
+      return [null,{lamports:1000000}];
+    });
+    await assert.rejects(open(prior).collect('northbank','refund-escrow',payer),/Recover the original journal/);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM wage_collection_pending').get().n,0);
+    const dest=getAssociatedTokenAddressSync(mint,bursarySigner.publicKey);
+    await sendAndConfirmTransaction(rpc,new Transaction().add(createCloseAccountInstruction(dest,payer.publicKey,bursarySigner.publicKey)),
+      [payer,bursarySigner],{commitment:'finalized'});
+    await sendAndConfirmTransaction(rpc,new Transaction().add(SystemProgram.transfer({fromPubkey:payer.publicKey,toPubkey:dest,
+      lamports:await rpc.getMinimumBalanceForRentExemption(0)})),[payer],{commitment:'finalized'});
     const interrupted=new Proxy(rpc,{get(target,key) {
       if (key==='confirmTransaction') return async(...args)=>{await target.confirmTransaction(...args);throw Error('Lost refund confirmation.');};
       const v=target[key];return typeof v==='function'?v.bind(target):v;

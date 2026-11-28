@@ -42,6 +42,11 @@ export async function verifyFundingSale(rpc,reserve,terms) {
       String(listing.bbMint)!==terms.mint) throw Error('Unverified purchase wage reserve.');
   const signed=Transaction.populate(record.transaction.message,record.transaction.signatures);
   const proof=verifyTransfer(record,signed,listing,buyer);
+  if (reserve.slot!==undefined) {
+    const timestamp=proof.blockTime??await rpc.getBlockTime(proof.slot);
+    if (proof.slot!==reserve.slot || !Number.isSafeInteger(timestamp) || timestamp*1000!==reserve.effectiveAt)
+      throw Error('Indexed purchase checkpoint differs from finalized evidence.');
+  }
   if (BigInt(proof.wageReserve.after)-BigInt(proof.wageReserve.before)!==BigInt(listing.wages))
     throw Error('Purchase reserve funding differs from the registered sale.');
 }
