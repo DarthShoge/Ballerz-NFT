@@ -16,7 +16,10 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
     const manager=managers[role];
     await page.exposeFunction('signReviewed',base64=>{
       const message=Buffer.from(base64,'base64');
-      assert.equal(message.toString('utf8'),loanMessage(agreement.terms));
+      const signed=message.toString('utf8');
+      if (signed.startsWith('View my Ballerz loan agreements\n')) {
+        assert.ok(signed.startsWith('View my Ballerz loan agreements\n'+origin+'\nWallet: '+manager.publicKey+'\nRequest: '));
+      } else assert.equal(signed,loanMessage(agreement.terms));
       return Buffer.from(ed25519.sign(message,manager.secretKey.slice(0,32))).toString('base64');
     });
     await page.addInitScript(({address,role})=>{
@@ -35,6 +38,12 @@ export async function managerLoanJourney(browser,origin,agreement,managers,check
         window.solflare={publicKey:address,connect:async()=>({publicKey:address}),signMessage:sign};
       }
     },{address:String(manager.publicKey),role});
+    await page.goto(origin);
+    await page.getByRole('link',{name:'Loans',exact:true}).click();
+    await page.getByRole('button',{name:'Open my inbox'}).click();
+    await page.getByRole('link',{name:/Awaiting your approval/}).click();
+    assert.equal(page.url(),url);
+    // Reopening a private invitation must reach the same review directly.
     await page.goto(url);
     await page.getByRole('button',{name:'Connect Solflare'}).click();
     await page.getByText('Connected wallet · '+manager.publicKey).waitFor();

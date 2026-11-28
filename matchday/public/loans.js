@@ -1,10 +1,8 @@
-import { getWallets } from '/vendor/wallet-standard.js';
-import { connectInjected, keyOf } from './listing-wallet.js';
+import { connectLoanWallet } from './loan-wallet.js';
 import { loanMessage } from './loan-message.js';
 
 const el = id => document.getElementById(id);
 const id = location.hash.slice(1);
-const registry = getWallets();
 let agreement, signer, busy=false;
 const path='/api/loans/'+encodeURIComponent(id);
 async function api(suffix='',options) {
@@ -43,28 +41,7 @@ async function run(action) {
 }
 el('connect').onclick=()=>run(async()=>{
   signer=undefined;
-  const wallet=registry.get().find(w=>w.name==='Solflare');
-  if (wallet?.features['solana:signMessage'] && wallet.features['standard:connect']) {
-    const {accounts}=await wallet.features['standard:connect'].connect();
-    const account=accounts[0];
-    if (!account?.chains.includes('solana:devnet')) throw Error('Select your Ballerz Devnet account in Solflare.');
-    signer={address:account.address,async sign(message) {
-      if (wallet.accounts[0]?.address!==account.address) throw Error('Wallet changed. Reconnect before approving.');
-      const [result]=await wallet.features['solana:signMessage'].signMessage({account,message});
-      if (!(result.signedMessage instanceof Uint8Array) || result.signedMessage.length!==message.length ||
-          !message.every((byte,i)=>result.signedMessage[i]===byte)) throw Error('Wallet returned a different message.');
-      return result.signature;
-    }};
-  } else {
-    const injected=window.solflare;
-    if (!injected?.signMessage) throw Error('Open this agreement in the browser profile with Solflare installed.');
-    const address=(await connectInjected(injected)).toBase58();
-    signer={address,async sign(message) {
-      if (keyOf(injected.publicKey)?.toBase58()!==address) throw Error('Wallet changed. Reconnect before approving.');
-      const reply=await injected.signMessage(message,'utf8');
-      return reply.signature ?? reply;
-    }};
-  }
+  signer=await connectLoanWallet();
   await refresh();
 });
 el('sign').onclick=()=>run(async()=>{
@@ -79,4 +56,5 @@ el('sign').onclick=()=>run(async()=>{
 });
 el('refresh').onclick=()=>run(refresh);
 window.addEventListener('hashchange',()=>location.reload());
-run(refresh);
+if (id) run(refresh);
+else location.replace('/my-loans.html');

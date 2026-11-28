@@ -119,7 +119,13 @@ export async function managerListingJourney(rpc,sponsor,seller,other,world) {
     assert.equal(market.active.price,110000);
     assert.equal(market.active.signature,receipt.signature);
     assert.equal((await request('/approve',{...packet,signed})).status,409);
-    await page.goto(origin+'/listings.html');await button('Connect seller wallet').click();
+    await page.goto(origin+'/listings.html');
+    await page.evaluate(()=>{delete window.solflare;});
+    await button('Connect seller wallet').click();
+    await page.getByText('Seller wallet · '+address).waitFor();
+    await page.reload();
+    await page.evaluate(()=>{delete window.solana;});
+    await button('Connect seller wallet').click();
     await button('Review cancellation').click();await button('Approve cancellation in wallet').click();
     await page.getByText(/Approval recorded/).waitFor();
     market=await finalized();
