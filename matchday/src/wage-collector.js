@@ -46,15 +46,16 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
   async function resolveManual(terms) {
     const intents=db.prepare('SELECT * FROM wage_manual_intents WHERE club=?').all(terms.club);
     if (!intents.length) return true;
-    const height=await rpc.getBlockHeight('finalized');
-    if (intents.some(intent=>intent.lastHeight>=height)) return false;
+    const root=await rpc.getEpochInfo('finalized');
+    if (!Number.isSafeInteger(root.blockHeight) || !Number.isSafeInteger(root.absoluteSlot) ||
+        intents.some(intent=>intent.lastHeight>=root.blockHeight)) return false;
     const start=intents.reduce((slot,i)=>Math.min(slot,i.firstSlot),Infinity);
     if (await rpc.getFirstAvailableBlock()>start) throw Error('Restore finalized history to reconcile earlier manual wage requests.');
     const messages=new Set(intents.map(i=>i.message));
     const key=new PublicKey(terms.payroll);
     let before;
     while (messages.size) {
-      const page=await rpc.getSignaturesForAddress(key,{limit:100,before,minContextSlot:start},'finalized');
+      const page=await rpc.getSignaturesForAddress(key,{limit:100,before,minContextSlot:root.absoluteSlot},'finalized');
       for (const row of page) {
         if (row.slot<start || row.err) continue;
         const record=await rpc.getTransaction(row.signature,{commitment:'finalized',maxSupportedTransactionVersion:0});
@@ -65,10 +66,12 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
           messages.delete(message);
         }
       }
-      if (page.length<100 || page.at(-1).slot<start) break;
+      if (!page.length || page.at(-1).slot<start) break;
+      if (before===page.at(-1).signature) throw Error('Finalized payment history stopped advancing.');
       before=page.at(-1).signature;
     }
     // The finalized root passed expiry and retained history spans issuance.
+    if (messages.size && await rpc.getFirstAvailableBlock()>start) throw Error('Restore finalized history before clearing expired payments.');
     for (const message of messages) db.prepare('DELETE FROM wage_manual_intents WHERE message=?').run(message);
     return true;
   }
@@ -115,10 +118,13 @@ export function wageCollector(db,rpc,market,statement,reconcile,config) {
         !expected.serializeMessage().equals(signed.serializeMessage())) throw Error('Stored collection terms changed.');
     const read=()=>rpc.getTransaction(row.signature,{commitment:'finalized',maxSupportedTransactionVersion:0});
     let record=await read();
-    if (!record && await rpc.getBlockHeight('finalized')>block.lastValidBlockHeight) {
+    const root=!record && await rpc.getEpochInfo('finalized');
+    if (root && root.blockHeight>block.lastValidBlockHeight) {
       record=await read();
       if (!record) {
-        if (await rpc.getAccountInfo(marker,'finalized')) throw Error('Collection marker exists. Restore its finalized receipt before retrying.');
+        if (!Number.isSafeInteger(root.absoluteSlot) ||
+            await rpc.getAccountInfo(marker,{commitment:'finalized',minContextSlot:root.absoluteSlot}))
+          throw Error('Collection marker status is unresolved. Restore its finalized receipt before retrying.');
         db.prepare('DELETE FROM wage_collection_pending WHERE signature=?').run(row.signature);
         return {status:'expired',signature:row.signature};
       }
