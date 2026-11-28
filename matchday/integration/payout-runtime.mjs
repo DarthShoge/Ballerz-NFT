@@ -9,14 +9,20 @@ import {
 } from '@solana/spl-token';
 import { FailedTransactionMetadata, LiteSVM } from 'litesvm';
 import { appearanceBatch, treasuryAddresses } from '../src/devnet-settlement.js';
+import { wagePaymentInstructions } from '../src/wage-payment.js';
 
-test('signed payout instructions roll back together and a new blockhash cannot pay a fixture twice', async () => {
+function payrollRuntime() {
   const svm = new LiteSVM().withSigverify(true);
   const programs = process.env.SOLANA_TEST_PROGRAM_DIR;
   for (const [key, name] of [[TOKEN_PROGRAM_ID,'spl_token'],[ASSOCIATED_TOKEN_PROGRAM_ID,'spl_associated_token_account'],
     [new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),'spl_memo']]) {
     svm.addProgramFromFile(key,join(programs,name+'.so'));
   }
+  return svm;
+}
+
+test('signed payout instructions roll back together and a new blockhash cannot pay a fixture twice', async () => {
+  const svm = payrollRuntime();
   const payer = Keypair.generate();
   const clubKeys = [Keypair.generate(), Keypair.generate()];
   const owners = clubKeys.map(key => key.publicKey);
@@ -70,4 +76,32 @@ test('signed payout instructions roll back together and a new blockhash cannot p
   assert.ok(send(another.transaction) instanceof FailedTransactionMetadata);
   assert.deepEqual(balances(),[16000n,8000n,8000n]);
   assert.equal(svm.getAccount(another.marker),null);
+});
+
+test('club payroll moves the signed whole BB and preserves both balances when underfunded', () => {
+  const svm = payrollRuntime();
+  const source = Keypair.generate(), treasury = Keypair.generate(), mint = Keypair.generate();
+  svm.airdrop(source.publicKey,2_000_000_000n);
+  const terms = {club:'eastport',epoch:1,genesis:'runtime',mint:String(mint.publicKey),
+    sponsor:String(Keypair.generate().publicKey),payroll:String(source.publicKey),treasury:String(treasury.publicKey)};
+  const [transfer] = wagePaymentInstructions(terms,1n);
+  const from = transfer.keys[0].pubkey, to = transfer.keys[2].pubkey;
+  function send(tx,...extra) {
+    svm.expireBlockhash();
+    tx.recentBlockhash=svm.latestBlockhash();tx.feePayer=source.publicKey;tx.sign(source,...extra);
+    return svm.sendTransaction(tx);
+  }
+  const setup = new Transaction().add(SystemProgram.createAccount({fromPubkey:source.publicKey,newAccountPubkey:mint.publicKey,
+    space:MINT_SIZE,lamports:Number(svm.minimumBalanceForRentExemption(BigInt(MINT_SIZE))),programId:TOKEN_PROGRAM_ID}),
+    createInitializeMint2Instruction(mint.publicKey,0,source.publicKey,null),
+    createAssociatedTokenAccountIdempotentInstruction(source.publicKey,from,source.publicKey,mint.publicKey),
+    createAssociatedTokenAccountIdempotentInstruction(source.publicKey,to,treasury.publicKey,mint.publicKey),
+    createMintToInstruction(mint.publicKey,from,source.publicKey,80n));
+  assert.ok(!(send(setup,mint) instanceof FailedTransactionMetadata));
+  const pay = amount => send(new Transaction().add(...wagePaymentInstructions(terms,amount)));
+  const balances = () => [from,to].map(key => AccountLayout.decode(svm.getAccount(key).data).amount);
+  assert.ok(pay(100n) instanceof FailedTransactionMetadata);
+  assert.deepEqual(balances(),[80n,0n]);
+  assert.ok(!(pay(40n) instanceof FailedTransactionMetadata));
+  assert.deepEqual(balances(),[40n,40n]);
 });

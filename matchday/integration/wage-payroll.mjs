@@ -8,6 +8,8 @@ import { openStore } from '../src/local-store.js';
 import { clubLoanWages } from '../src/club-loan-wages.js';
 import { loanAgreements } from '../src/loan-agreements.js';
 import { GAME_YEAR_MS } from '../src/world-clock.js';
+import { ed25519 } from '@noble/curves/ed25519';
+import { wageStatementMessage } from '../public/wage-statement-message.js';
 
 export async function wagePayrollJourney(rpc,payer,world) {
   const source = Keypair.generate(), treasury = Keypair.generate().publicKey;
@@ -16,8 +18,10 @@ export async function wagePayrollJourney(rpc,payer,world) {
     fromPubkey:payer.publicKey,toPubkey:source.publicKey,lamports:2000000})),[payer],{commitment:'finalized'});
   const file = join(world,'year-end-wages.sqlite');
   const store = openStore(file);
-  const epoch = (await rpc.getBlockTime(await rpc.getSlot('finalized')))*1000-GAME_YEAR_MS-10000;
+  const epoch = Math.min(Date.now(),(await rpc.getBlockTime(await rpc.getSlot('finalized')))*1000)-GAME_YEAR_MS-10000;
+  const manager = Keypair.generate(), wallet=String(manager.publicKey);
   const config = {genesis:await rpc.getGenesisHash(),sponsor:String(payer.publicKey),bbMint:String(mint),
+    wallets:{[wallet]:'eastport'},loanManagers:{eastport:wallet},
     players:{winger:'northbank-7'},wageSettlement:{treasury:String(treasury),
       payroll:{eastport:String(source.publicKey),northbank:String(Keypair.generate().publicKey)}}};
   let db = new DatabaseSync(file);
@@ -53,5 +57,13 @@ export async function wagePayrollJourney(rpc,payer,world) {
     }
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM wage_receipts').get().n,2);
     assert.equal((await rpc.getTokenAccountBalance(getAssociatedTokenAddressSync(mint,treasury),'finalized')).value.amount,'105');
+    const statements=clubLoanWages(db,()=>config,Date.now,rpc), origin='http://localhost:4173';
+    const proof=statements.challenge(wallet,origin,1);
+    const signature=Buffer.from(ed25519.sign(Buffer.from(wageStatementMessage(origin,wallet,proof)),
+      manager.secretKey.slice(0,32))).toString('base64');
+    const {settlement}=statements.read({wallet,year:1,nonce:proof.nonce,signature},origin);
+    assert.equal(settlement.paid,'100');
+    assert.equal(settlement.arrears,'0');
+    assert.equal(settlement.slot,Math.max(...results.map(row=>row.slot)));
   } finally {db.close();store.close();}
 }
