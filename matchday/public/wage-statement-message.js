@@ -1,4 +1,4 @@
-export function wageStatementMessage(origin,wallet,{nonce,expiresAt}) {
+export function wageStatementMessage(origin,wallet,{nonce,expiresAt,scope}) {
   return ['View my Ballerz club loan wages',origin,'Wallet: '+wallet,'Request: '+nonce,
-    'Expires: '+new Date(expiresAt).toISOString(),'Read one wage year for my club. No payment is authorized.'].join('\n');
+    'Expires: '+new Date(expiresAt).toISOString(),'Wage year: '+scope,'Read-only statement. No payment is authorized.'].join('\n');
 }

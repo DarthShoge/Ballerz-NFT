@@ -30,12 +30,12 @@ test('club statements combine fractional obligations, split the wage years and r
     db.prepare(`INSERT INTO loan_agreements(id,mint,startAt,endAt,terms,checkedSlot,parentSignature,borrowerSignature,confirmedAt,ownershipSlot)
       VALUES(?,?,?,?,?,1,'p','b',?,1)`).run('private-'+mint,mint,terms.startAt,terms.endAt,JSON.stringify(terms),epoch-1);
   }
-  const proof=()=>{
-    const ticket=statements.challenge(wallet,origin);
+  const proof=year=>{
+    const ticket=statements.challenge(wallet,origin,year);
     return {wallet,nonce:ticket.nonce,signature:Buffer.from(ed25519.sign(Buffer.from(wageStatementMessage(origin,wallet,ticket)),
       manager.secretKey.slice(0,32))).toString('base64')};
   };
-  const read=y=>statements.read({...proof(),year:y},origin);
+  const read=y=>statements.read({...proof(y),year:y},origin);
   assert.equal(read().total,null);
   for (const mint of ['a','b']) desk.publishRate({mint,year:1,annualBB:1});
   const first=read();
@@ -53,6 +53,7 @@ test('club statements combine fractional obligations, split the wage years and r
   now+=year/2;desk.publishRate({mint:'b',year:2,annualBB:10});
   assert.deepEqual(read(2).total,{wholeBB:'5',remainder:'0'});
   assert.equal(read(2).lines.length,1);
+  assert.throws(()=>statements.read({...proof(1),year:2},origin),/selected wage year/);
   assert.deepEqual(read(1).total,{wholeBB:'1',remainder:String(BigInt(first.denominator)/4n)});
   const data=proof();
   const post=(site,body)=>loanApi(new Request(origin+'/api/loans/wages',{method:'POST',
