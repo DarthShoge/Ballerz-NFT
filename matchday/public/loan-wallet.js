@@ -20,7 +20,13 @@ export async function connectLoanWallet() {
     const injected=window.solflare;
     if (!injected?.signMessage) throw Error('Open this agreement in the browser profile with Solflare installed.');
     const address=(await connectInjected(injected)).toBase58();
-    return {address,watch(fn) { injected.on?.('accountChanged',fn); return ()=>injected.off?.('accountChanged',fn); },async sign(message) {
+    return {address,watch(fn) {
+      injected.on?.('accountChanged',fn); injected.on?.('disconnect',fn);
+      return ()=>{
+        const remove=injected.off ?? injected.removeListener;
+        remove?.call(injected,'accountChanged',fn); remove?.call(injected,'disconnect',fn);
+      };
+    },async sign(message) {
       if (keyOf(injected.publicKey)?.toBase58()!==address) throw Error('Wallet changed. Reconnect before approving.');
       const reply=await injected.signMessage(message,'utf8');
       return reply.signature ?? reply;

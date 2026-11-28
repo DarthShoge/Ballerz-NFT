@@ -4,7 +4,7 @@ import { connectInjected, keyOf, standardSolflare } from './listing-wallet.js';
 const el = id => document.getElementById(id);
 const params=new URLSearchParams(location.search);
 const useSolflare=params.get('wallet')==='solflare';
-const registry=useSolflare ? getWallets() : null;
+const registry=getWallets();
 if (useSolflare) el('connect').textContent='Connect Solflare';
 const suggestedPrice=Number(params.get('price'));
 if (Number.isSafeInteger(suggestedPrice) && suggestedPrice>0) el('price').value=String(suggestedPrice);
@@ -46,8 +46,9 @@ async function run(fn) {
   finally { busy=false; availability(); }
 }
 el('connect').onclick=()=>run(async()=>{
-  const standard=registry?.get().find(w=>w.name==='Solflare');
-  const provider=standard ? standardSolflare(standard) : useSolflare ? window.solflare : (window.phantom?.solana || window.solana);
+  const standard=registry.get().find(w=>w.name==='Solflare' && w.features['solana:signTransaction']);
+  const fallback=useSolflare ? undefined : (window.phantom?.solana || window.solana);
+  const provider=standard ? standardSolflare(standard) : (window.solflare?.signTransaction ? window.solflare : fallback);
   if (useSolflare && !provider?.signTransaction) throw Error('Open this page in your Ballerz browser profile with Solflare installed.');
   if (!provider?.signTransaction) throw Error('Open this page in a Solana wallet browser or connect a compatible wallet extension.');
   unwatch?.();invalidate();wallet=undefined;seller=undefined;state=null;availability();
